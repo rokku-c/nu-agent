@@ -124,12 +124,14 @@ core/     the runtime — not offered to the model
   style.nu        ANSI colour, off automatically when piped
   mcp.nu          MCP client
   mcp-server.nu   MCP server
+  provider.nu     dialect dispatch + execution
+  provider/       anthropic · stream (the SSE machine) · transport
   trace.nu        a run → a browsable HTML page
   layout.nu       where the checkout is, at runtime
   quote.nu        POSIX quoting
 
 tools/    the capabilities — these become the model's tools
-test/     unit · resolve · mcp · e2e
+test/     unit · resolve · stream · mcp · e2e
 ```
 
 **A file's name is its public tool name.** `tools/read.nu` exports `main`, so
@@ -186,6 +188,7 @@ nu test/run.nu unit mcp     # or just some suites
 |---|---|
 | `unit` | pure functions — schema generation, folding, markdown, TOON, calc, colour |
 | `resolve` | module resolution **in a child process**, stem uniqueness, the naming contract |
+| `stream` | the SSE state machine, replayed from canned bytes — thinking, tool fragments, no-SSE errors |
 | `mcp` | the real server over real stdio, including stdout purity |
 | `e2e` | a real model endpoint — tool round-trip, streaming, images, traces |
 

@@ -24,9 +24,6 @@
 #   ANTHROPIC_BASE_URL                         gateway url, official one by default
 #   ANTHROPIC_MODEL                            default model
 
-const VERSION_HEADER = "2023-06-01"
-const DEFAULT_BASE_URL = "https://api.anthropic.com"
-const DEFAULT_MODEL = "claude-sonnet-5"
 const DEFAULT_MAX_OUTPUT = 8000
 # measured: models behind this gateway have a 1048576 token window; ~15% headroom left by default
 const DEFAULT_CONTEXT_BUDGET = 890_000
@@ -35,29 +32,27 @@ use ./context.nu
 use ./markdown.nu
 use ./style.nu
 use ./mcp.nu
+use ./provider.nu
 use ../tools/image.nu
 
 # strip Claude Code style context markers (e.g. "deepseek-flash[1M]").
 # such suffixes are only CLI-internal aliases; sending them to the API as-is 404s.
+#
+# this stays provider-agnostic on purpose: the alias is a CLI convention that
+# leaks into whichever model env var is set, so it is not a dialect's business.
 def strip-alias [m: string]: nothing -> string {
   $m | str replace -r '\s*\[[^\]]*\]\s*$' '' | str trim
 }
 
-def auth-token []: nothing -> string {
-  let t = ($env.ANTHROPIC_AUTH_TOKEN? | default ($env.ANTHROPIC_API_KEY? | default ""))
-  if ($t | is-empty) {
-    error make { msg: "missing the ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY env var" }
-  }
-  $t
+# the resolved dialect: an explicit --provider, else $env.NU_AGENT_PROVIDER, else
+# inferred from which credentials exist.
+def dialect [explicit: any]: nothing -> string {
+  provider active $explicit
 }
 
-def base-url []: nothing -> string {
-  ($env.ANTHROPIC_BASE_URL? | default $DEFAULT_BASE_URL) | str trim -r -c "/"
-}
-
-def default-model []: nothing -> string {
-  let m = ($env.ANTHROPIC_MODEL? | default $DEFAULT_MODEL)
-  if ($m | is-empty) { $DEFAULT_MODEL } else { strip-alias $m }
+def default-model [p: string]: nothing -> string {
+  let m = (provider model $p)
+  if ($m | is-empty) { provider model "anthropic" } else { strip-alias $m }
 }
 
 # all progress/diagnostic output goes through here.
@@ -102,8 +97,11 @@ def user-content [text: string, images: any]: nothing -> any {
   ($imgs | each {|p| image-block $p }) | append [{type: "text", text: $text}]
 }
 
-# send one /v1/messages request, return the parsed response body
+# the two ways to get a message back. both return the same canonical shape, so
+# nothing downstream has to know which one ran, and both are thin: the dialect,
+# the transport and the status handling all live behind `provider`.
 def api-call [
+  p: string
   messages: list
   tools: any
   system: any
@@ -112,185 +110,17 @@ def api-call [
   temperature: any
   timeout: duration
 ]: nothing -> record {
-  let token = (auth-token)
-  let base = (base-url)
-
-  # only insert a field when it has a value, so we never send null to the server
-  let body = (
-    {model: $model, max_tokens: $max_tokens, messages: $messages}
-    | if $system == null { $in } else { insert system $system }
-    | if $temperature == null { $in } else { insert temperature $temperature }
-    | if ($tools | is-empty) { $in } else { insert tools $tools }
-  )
-
-  # send both Authorization and x-api-key: the official API wants x-api-key,
-  # while gateways behind ANTHROPIC_AUTH_TOKEN usually want Bearer; giving both is easiest
-  let resp = (
-    http post --allow-errors --full --max-time $timeout
-      --content-type "application/json"
-      --headers {
-        Authorization: $"Bearer ($token)"
-        x-api-key: $token
-        anthropic-version: $VERSION_HEADER
-      }
-      $"($base)/v1/messages"
-      $body
-  )
-
-  if $resp.status != 200 {
-    let detail = ($resp.body | get --optional error.message | default ($resp.body | to json -r))
-    error make { msg: $"API returned ($resp.status): ($detail)" }
-  }
-
-  $resp.body
+  provider send $p {
+    model: $model, max_tokens: $max_tokens, messages: $messages
+    system: $system, temperature: $temperature, tools: $tools, stream: false
+  } $timeout
 }
 
-# ── streaming ──
-#
-# why curl and not http post: nu's http post has no streaming callback, it returns only
-# after reading the whole body. measured: nu reads external processes **streaming**
-# (line by line, not buffered), so we go through curl -N.
-# line-by-line parsing goes to reduce -- also measured lazy, so it prints the moment a delta arrives.
-#
-# reduce and not each: each's closure can't capture mutable variables, so it can't accumulate state.
-
-def stream-seed []: nothing -> record {
-  {blocks: [], idx: -1, stop_reason: null, usage: {}, id: null, model: null, other: [], mdstate: {buf: "", in_fence: false}}
-}
-
-# replace the nth item of the current block outright.
-# avoid variable-indexed cell paths like update blocks.$i.xxx -- they surprise you;
-# rebuilding the list is the most reliable.
-def replace-block [blocks: list, i: int, f: closure]: nothing -> list {
-  $blocks | enumerate | each {|r| if $r.index == $i { do $f $r.item } else { $r.item } }
-}
-
-# handle one SSE line
-def stream-step [line: string, a: record, show_thinking: bool, render: bool, on: bool]: nothing -> record {
-  if not ($line | str starts-with "data: ") {
-    # comma-separated fragments must be joined before parsing. keep non-data lines around so an error can report them
-    if ($line | str starts-with "event: ") { return $a }
-    if ($line | str trim | is-empty) { return $a }
-    return ($a | upsert other ($a.other | append $line))
-  }
-
-  let payload = ($line | str substring 6..)
-  if ($payload | str trim) == "[DONE]" { return $a }
-
-  let ev = (try { $payload | from json } catch { return $a })
-  let t = ($ev | get --optional type | default "")
-  let bi = ($a.idx | default 0)
-
-  if $t == "message_start" {
-    let m = ($ev | get --optional message | default {})
-    return {
-      blocks: [], idx: -1, other: $a.other
-      mdstate: ($a | get --optional mdstate | default {buf: "", in_fence: false})
-      stop_reason: ($m | get --optional stop_reason)
-      usage: ($m | get --optional usage | default {})
-      id: ($m | get --optional id)
-      model: ($m | get --optional model)
-    }
-  }
-
-  if $t == "content_block_start" {
-    let cb = ($ev | get --optional content_block | default {})
-    let kind = ($cb | get --optional type | default "text")
-    let block = (
-      if $kind == "tool_use" {
-        {type: "tool_use", id: ($cb | get --optional id | default ""), name: ($cb | get --optional name | default ""), input: ""}
-      } else if $kind == "thinking" {
-        {type: "thinking", thinking: "", signature: ""}
-      } else {
-        {type: "text", text: ""}
-      }
-    )
-    return ($a | upsert blocks ($a.blocks | append $block) | upsert idx ($ev | get --optional index | default 0))
-  }
-
-  if $t == "content_block_delta" {
-    let d = ($ev | get --optional delta | default {})
-    let dt = ($d | get --optional type | default "")
-
-    if $dt == "text_delta" {
-      let piece = ($d | get --optional text | default "")
-      if $render {
-        # line-buffered rendering: markdown is block-level syntax, so a chunk that isn't
-        # finished can't be rendered (code fences especially); hand it to markdown to hold
-        # until a newline
-        let st = ($a | get --optional mdstate | default {buf: "", in_fence: false})
-        let step = (markdown stream-step $st $piece $on)
-        if ($step.out | is-not-empty) { print -n $step.out }
-        return (
-          $a
-          | upsert mdstate $step.state
-          | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert text ($b.text + $piece) })
-        )
-      }
-      print -n $piece
-      return ($a | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert text ($b.text + $piece) }))
-    }
-    if $dt == "thinking_delta" {
-      let piece = ($d | get --optional thinking | default "")
-      if $show_thinking {
-        if not ($a | get --optional th_open | default false) {
-          print -e ""
-          print -e "### thinking"
-          print -e ""
-        }
-        print -e -n $piece
-        return ($a | upsert th_open true | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert thinking ($b.thinking + $piece) }))
-      }
-      return ($a | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert thinking ($b.thinking + $piece) }))
-    }
-    if $dt == "signature_delta" {
-      let piece = ($d | get --optional signature | default "")
-      return ($a | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert signature ($b.signature + $piece) }))
-    }
-    if $dt == "input_json_delta" {
-      let piece = ($d | get --optional partial_json | default "")
-      return ($a | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert input ($b.input + $piece) }))
-    }
-    return $a
-  }
-
-  if $t == "content_block_stop" {
-    let b = ($a.blocks | get --optional $bi)
-    if ($b | get --optional type) == "tool_use" {
-      # input is a JSON string assembled piece by piece; only parse it into a record at the end
-      let raw = ($b | get --optional input | default "")
-      let parsed = (if ($raw | str trim | is-empty) { {} } else { try { $raw | from json } catch { {} } })
-      return ($a | upsert blocks (replace-block $a.blocks $bi {|x| $x | upsert input $parsed }))
-    }
-    return $a
-  }
-
-  if $t == "message_stop" {
-    # the last line usually has no newline; emit the leftover buffer when wrapping up
-    if $render {
-      let st = ($a | get --optional mdstate | default {buf: "", in_fence: false})
-      let f = (markdown stream-flush $st $on)
-      if ($f.out | is-not-empty) { print -n $f.out }
-      return ($a | upsert mdstate $f.state)
-    }
-    return $a
-  }
-
-  if $t == "message_delta" {
-    let d = ($ev | get --optional delta | default {})
-    return (
-      $a
-      | upsert stop_reason ($d | get --optional stop_reason | default $a.stop_reason)
-      | upsert usage ($ev | get --optional usage | default $a.usage)
-    )
-  }
-
-  $a
-}
-
-# send one streaming request. the return shape matches api-call (an Anthropic message body),
-# so callers don't have to tell the two paths apart.
+# streaming. the accumulator and SSE handling live in core/provider/stream.nu;
+# the markdown renderer is passed in, because it is this file's dependency.
+# why a stream needs curl at all is explained in transport.nu.
 def stream-api-call [
+  p: string
   messages: list
   tools: any
   system: any
@@ -301,49 +131,10 @@ def stream-api-call [
   show_thinking: bool
   render: bool
 ]: nothing -> record {
-  let token = (auth-token)
-  let base = (base-url)
-
-  let body = (
-    {model: $model, max_tokens: $max_tokens, messages: $messages, stream: true}
-    | if $system == null { $in } else { insert system $system }
-    | if $temperature == null { $in } else { insert temperature $temperature }
-    | if ($tools | is-empty) { $in } else { insert tools $tools }
-  )
-
-  # argv passed straight through, body as one -d argument, with no shell escaping anywhere
-  let secs = ((($timeout | into int) / 1000000000) | math floor | into string)
-  let argv = [
-    "curl" "-sS" "-N" "--max-time" $secs
-    "-X" "POST" $"($base)/v1/messages"
-    "-H" "content-type: application/json"
-    "-H" $"x-api-key: ($token)"
-    "-H" $"Authorization: Bearer ($token)"
-    "-H" "anthropic-version: 2023-06-01"
-    "-d" ($body | to json -r)
-  ]
-
-  let a = (
-    run-external ($argv | first) ...($argv | skip 1)
-    | lines
-    | reduce --fold (stream-seed) {|l, acc| (stream-step $l $acc $show_thinking $render (style enabled)) }
-  )
-
-  # no block parsed out of the stream means this wasn't SSE -- almost certainly the gateway sent back an error JSON
-  if ($a.blocks | is-empty) and ($a.stop_reason == null) {
-    let hint = ($a.other | str join " " | str trim)
-    let shown = (if ($hint | str length) > 500 { $hint | str substring 0..500 } else { $hint })
-    error make { msg: $"streaming request failed\(no SSE received\): ($shown)" }
-  }
-
-  {
-    id: $a.id
-    model: $a.model
-    role: "assistant"
-    content: $a.blocks
-    stop_reason: $a.stop_reason
-    usage: $a.usage
-  }
+  provider send-stream $p {
+    model: $model, max_tokens: $max_tokens, messages: $messages
+    system: $system, temperature: $temperature, tools: $tools, stream: true
+  } $timeout $show_thinking $render (style enabled) {|st, c, o| markdown stream-step $st $c $o } {|st, o| markdown stream-flush $st $o }
 }
 
 # pick blocks of a given type out of content
@@ -536,11 +327,15 @@ def normalize-tools [raw: any]: nothing -> list {
 # ── public commands ──
 
 # show the config currently in effect (never the token contents)
-export def config []: nothing -> record {
-  let t = ($env.ANTHROPIC_AUTH_TOKEN? | default ($env.ANTHROPIC_API_KEY? | default ""))
+export def config [--provider (-p): string]: nothing -> record {
+  let p = (dialect $provider)
+  # auth is reported, not required — an unconfigured setup should be able to ask
+  # what is wrong without the question itself throwing
+  let t = (try { provider auth $p } catch { "" })
   {
-    base_url: (base-url)
-    model: (default-model)
+    provider: $p
+    base_url: (provider url $p)
+    model: (default-model $p)
     auth: (if ($t | is-empty) { "not set" } else { $"set, ($t | str length) chars" })
   }
 }
@@ -549,7 +344,8 @@ export def config []: nothing -> record {
 export def chat [
   prompt: string                  # the prompt to send
   --system (-s): string           # system prompt
-  --model (-m): string            # model name, defaults to $env.ANTHROPIC_MODEL
+  --model (-m): string            # model name, defaults to the provider's own env var
+  --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
   --max-tokens (-t): int = 2048   # max output tokens; note that thinking blocks also spend from it
   --temperature (-T): float       # sampling temperature, server default when omitted
   --timeout: duration = 120sec    # request timeout
@@ -560,7 +356,8 @@ export def chat [
   --image: list<path>             # attach images to the question (vision models only)
   --json (-j)                     # return the full response record instead of plain text
 ]: nothing -> any {
-  let model = (strip-alias ($model | default (default-model)))
+  let p = (dialect $provider)
+  let model = (strip-alias ($model | default (default-model $p)))
   let tools = (normalize-tools $tools)
 
 
@@ -570,9 +367,9 @@ export def chat [
 
   let body = (
     if $stream {
-      stream-api-call [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout $show_thinking $md
+      stream-api-call $p [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout $show_thinking $md
     } else {
-      api-call [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout
+      api-call $p [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout
     }
   )
 
@@ -729,6 +526,7 @@ export def main [
   --tools: list                   # tool definitions, usually expose from-module output
   --system (-s): string           # system prompt
   --model (-m): string
+  --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
   --max-tokens (-t): int = 4096
   --temperature (-T): float
   --timeout: duration = 120sec
@@ -747,7 +545,8 @@ export def main [
   --skill: list<path>             # mount SKILL.md files explicitly; their body joins the system prompt
   --image: list<path>             # attach images to the opening question (vision models only)
 ]: nothing -> any {
-  let model = (strip-alias ($model | default (default-model)))
+  let p = (dialect $provider)
+  let model = (strip-alias ($model | default (default-model $p)))
   let tools = (normalize-tools $tools)
 
   # ── explicitly mounted skills ──
@@ -872,9 +671,9 @@ export def main [
     let attempt = (try {
         let b = (
           if $stream {
-            stream-api-call $messages $tools $sys $model $max_tokens $temperature $timeout $show_thinking $md
+            stream-api-call $p $messages $tools $sys $model $max_tokens $temperature $timeout $show_thinking $md
           } else {
-            api-call $messages $tools $sys $model $max_tokens $temperature $timeout
+            api-call $p $messages $tools $sys $model $max_tokens $temperature $timeout
           }
         )
         {ok: true, body: $b}

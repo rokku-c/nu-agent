@@ -14,6 +14,7 @@
 const SUITES = [
   {name: "unit",    covers: "pure functions, no network"}
   {name: "resolve", covers: "module resolution + the naming contract"}
+  {name: "stream",  covers: "the SSE state machine, replayed from canned bytes"}
   {name: "mcp",     covers: "the MCP server over real stdio"}
   {name: "e2e",     covers: "a real model endpoint (needs credentials)"}
 ]
