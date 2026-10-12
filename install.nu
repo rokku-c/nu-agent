@@ -41,7 +41,7 @@ const END = "# ── nu-agent (end) ──"
 const TOOL_MODULES = ["bash" "calc" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "toon" "write"]
 # task is a capability (the model calls it), but it is not in tools/ — it is a
 # wrapper around the loop, and belongs beside it
-const CORE_MODULES = ["agent" "context" "expose" "markdown" "mcp" "policy" "session" "style" "task" "trace"]
+const CORE_MODULES = ["agent" "context" "expose" "handoff" "interactive" "markdown" "mcp" "policy" "session" "style" "task" "trace"]
 
 def root []: nothing -> path {
   # a SCRIPT (unlike a module body) does see $env.FILE_PWD at eval time — measured.
@@ -113,8 +113,7 @@ def patch-mcp [path: path, r: path, cfg: path, remove: bool]: nothing -> string 
 
   let servers = ($before | get --optional mcpServers | default {})
   let next = (
-    if $remove { $servers | reject --optional agent }
-    else { $servers | upsert agent (mcp-entry $r $cfg) }
+    if $remove { $servers | reject --optional agent }     else { $servers | upsert agent (mcp-entry $r $cfg) }
   )
   if $next == $servers {
     return $"($path): nothing to change"

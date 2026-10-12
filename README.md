@@ -133,6 +133,20 @@ agent "audit every file under src/ for unwrap() and summarise" --tools-from [rea
 agent "start something" --session my-run --tools-from [read write bash]
 agent "carry on" --resume --session my-run
 session list
+
+# a conversation, not a run: each turn is added to the same session
+agent chat "my project is called Halcyon" --session conv
+agent chat "what is my project called?" --resume --session conv
+
+# interactive
+agent tui                          # new conversation
+agent tui --resume                 # the newest one
+agent tui --session my-run --tools-from [read bash nu-shell]
+
+# continue something another agent was doing
+handoff list --from claude-code
+handoff import claude-code 835031fb --into picked-up
+agent tui --resume --session picked-up
 ```
 
 ### The tools
@@ -155,6 +169,58 @@ definitions, so pointing the model at a tool you wrote yourself is one line.
 
 ---
 
+## Interactive
+
+```nushell
+agent tui
+agent tui --resume --session my-run
+```
+
+`›` prompts; a line is one streamed turn against the session. `/help` lists the
+commands — `/session`, `/new`, `/resume`, `/tools`, `/model`, `/system`,
+`/history`, `/clear`, `/quit`.
+
+It is a **line-based** interactive session, not a full-screen one. The input line
+is nushell's `input --reedline`, so arrow keys, word motions, Ctrl-R history
+search and bracketed paste all work — reedline implements them. A full-screen TUI
+is possible in nushell (`input --numchar 1` reads single keystrokes), but then
+editing, paste and unicode width become mine to get right, and getting them wrong
+is worse than not having a frame.
+
+Two things worth knowing, both measured: `input --reedline` must not sit inside a
+`try` — it returns `""` instantly and forever instead of waiting for a line, so
+the read and the loop around it are bare. And each turn is written to the session
+as it completes, so quitting, crashing or closing the terminal loses at most the
+turn in flight.
+
+## Handoff
+
+```nushell
+handoff sources                        # which agents have sessions here, and how many
+handoff list                           # recent sessions across all of them
+handoff list --from codex --cwd .
+handoff read claude-code 835031fb      # what would be imported, without importing
+handoff import claude-code 835031fb --into picked-up --tail 20
+agent "carry on from where that left off" --resume --session picked-up
+```
+
+Reads **claude-code**, **codex** and **pi** transcripts. It imports the
+conversation — the user and assistant turns, in order — and not the tool calls.
+
+That is a deliberate limit, not an omission. The three agents represent tools
+three different ways and the calls they made are not nu commands: a codex
+`function_call` for its shell tool has no nu equivalent, and replaying one
+through the agent loop would tell the model it had run something it had not. So
+tool calls are counted and reported instead, and the resumed run is told both
+where it came from and that tools named in the older transcript may not exist
+here or may behave differently.
+
+**Only a tail is loaded by default.** These transcripts get large — the one this
+was written against holds 700+ messages across 4000 tool calls — so a handoff
+records how much to load and the rest stays in the store, readable with
+`session show`. The full history is what gets written back, so resuming never
+truncates it.
+
 ## Layout
 
 ```
@@ -162,6 +228,8 @@ core/     the runtime — not offered to the model
   agent.nu        the loop: request, stream, tool execution, folding, MCP, skills
   expose.nu       command signatures → tool definitions
   context.nu      context capture and folding
+  handoff.nu      read another agent's transcript (claude-code · codex · pi)
+  interactive.nu  the `agent tui` loop
   policy.nu       the tool permission gate (opt-in; default allow)
   session.nu      persist a run and resume it later (opt-in; default ephemeral)
   task.nu         delegate a subtask to a nested run (the `task` tool)
@@ -176,7 +244,7 @@ core/     the runtime — not offered to the model
   quote.nu        POSIX quoting
 
 tools/    the capabilities — these become the model's tools
-test/     unit · resolve · stream · policy · session · task · mcp · e2e
+test/     unit · resolve · stream · policy · handoff · session · task · mcp · e2e
 ```
 
 **A file's name is its public tool name.** `tools/read.nu` exports `main`, so
@@ -256,7 +324,8 @@ nu test/run.nu unit mcp     # or just some suites
 | `openai` | the OpenAI dialect's translation, plus the streaming state it needs |
 | `stream` | the SSE state machine, replayed from canned bytes — thinking, tool fragments, no-SSE errors |
 | `policy` | the permission gate: matching, refusal wording, deferral, and enforcement through the tool executor |
-| `session` | persistence and resume, including the invariant that a folded run stores its unfolded history |
+| `session` | persistence and resume, the resume window, and the invariant that a folded run stores its unfolded history |
+| `handoff` | the three transcript formats, the import stamp, and the tail|
 | `task` | subagents: depth and capability guards, lineage, and the stored child transcript |
 | `mcp` | the real server over real stdio, including stdout purity |
 | `e2e` | a real model endpoint — tool round-trip, streaming, images, traces |

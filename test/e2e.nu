@@ -14,7 +14,7 @@ use ./harness.nu *
 if not (needs-creds) {
   # skipped, not failed: a checkout without credentials must not go red, but it
   # must not look green either
-  emit [(skip "e2e: whole suite" "no ANTHROPIC_AUTH_TOKEN in the environment — set one to run these")]
+  emit [(skipped "e2e: whole suite" "no ANTHROPIC_AUTH_TOKEN in the environment — set one to run these")]
   return
 }
 
@@ -114,7 +114,7 @@ let results = [
   # on the other side at all.
   (case "e2e: the OpenAI dialect answers a plain turn" {
     if not (openai-ready) {
-      skip "e2e: the OpenAI dialect answers a plain turn" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+      skipped "e2e: the OpenAI dialect answers a plain turn" "set OPENAI_API_KEY and OPENAI_BASE_URL"
     } else {
       let out = (agent chat "reply with exactly: OK" --provider openai --max-tokens 64)
       (is-true "e2e: the OpenAI dialect answers a plain turn" (($out | str length) > 0))
@@ -125,7 +125,7 @@ let results = [
     # the case that caught the flatten bug: a single tool call became an object
     # where the wire wants an array, and only round two exposed it
     if not (openai-ready) {
-      skip "e2e: the OpenAI dialect runs the whole tool loop" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+      skipped "e2e: the OpenAI dialect runs the whole tool loop" "set OPENAI_API_KEY and OPENAI_BASE_URL"
     } else {
       let r = (agent "What is (1234 * 5678) + 99? You must use the calc tool." --tools-from [calc] --provider openai --max-tokens 512 --json)
       let digits = (($r.text | default "") | str replace -r -a "[^0-9]" "")
@@ -135,7 +135,7 @@ let results = [
 
   (case "e2e: the OpenAI dialect streams" {
     if not (openai-ready) {
-      skip "e2e: the OpenAI dialect streams" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+      skipped "e2e: the OpenAI dialect streams" "set OPENAI_API_KEY and OPENAI_BASE_URL"
     } else {
       let r = (^nu --config $nu.config-path -c 'agent chat "count to three" --provider openai --stream --max-tokens 128' | complete)
       (is-true "e2e: the OpenAI dialect streams" (($r.exit_code == 0) and (($r.stdout | str trim | str length) > 0)))

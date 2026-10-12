@@ -36,6 +36,10 @@ export def active [explicit: any]: nothing -> string {
   if $has_openai and (not $has_anthropic) { "openai" } else { "anthropic" }
 }
 
+# the dialects this build knows, for a caller that has to validate a name it
+# read from somewhere (a stored session, say) rather than one it chose.
+export def known []: nothing -> list<string> { $KNOWN }
+
 def check [p: string]: nothing -> nothing {
   if not ($p in $KNOWN) {
     error make { msg: $"unknown provider: ($p). known: ($KNOWN | str join ', ')" }

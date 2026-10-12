@@ -12,6 +12,12 @@
 use ./harness.nu *
 use ./../core/provider/openai.nu
 
+# the translation is the subject here, not authentication. a dummy key keeps
+# these hermetic — without one they quietly depended on whatever OPENAI_API_KEY
+# happened to be in the ambient environment, and went red the moment it was not.
+$env.OPENAI_API_KEY = "test-key-not-used"
+$env.OPENAI_BASE_URL = "https://example.invalid/v1"
+
 let tools = (expose from-module calc)
 
 # build a mixed-shape block list the way the runtime actually gets one: from

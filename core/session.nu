@@ -89,7 +89,7 @@ export def last []: nothing -> any {
 # the declared table return. `[] | select <cols>` is an empty list carrying the
 # right columns.
 def empty-table []: nothing -> table {
-  [] | select id updated status provider model title rounds messages parent depth
+  [] | select id updated status provider model title rounds messages parent depth from
 }
 
 export def list []: nothing -> table {
@@ -112,6 +112,7 @@ export def list []: nothing -> table {
         messages: (($e | get --optional messages | default []) | length)
         parent: ($e | get --optional parent | default null)
         depth: ($e | get --optional depth | default 0)
+        from: ($e | get --optional handoff.from | default "")
       }
     }
   | compact
@@ -153,6 +154,7 @@ export def show [
     folds: (($e | get --optional folds | default []) | length)
     parent: ($e | get --optional parent | default null)
     depth: ($e | get --optional depth | default 0)
+    handoff: ($e | get --optional handoff)
   }
   # the overview goes to stderr, so `session show $id | to json` stays clean
   $head | print -e
@@ -175,6 +177,33 @@ export def show [
         )
       }
     }
+}
+
+# Split a stored history into what a run should LOAD and what it should leave
+# behind.
+#
+# The distinction is the point: a session's whole history stays in the file, and
+# only a window of it goes into the conversation. A run that loaded the tail must
+# therefore write `prefix ++ what-it-did` back, or the next save silently
+# truncates the session to whatever was loaded.
+#
+# `tail` precedence: an explicit number, then what the session itself recorded
+# (a handoff sets a small one, because another agent's transcript is long), then
+# everything.
+export def window [prior: any, tail: any]: nothing -> record {
+  if $prior == null { return {prefix: [], loaded: []} }
+  let stored = ($prior | get --optional messages | default [])
+  let want = (
+    if $tail != null { $tail }     else if (($prior | get --optional handoff.tail) != null) { $prior.handoff.tail }     else { $stored | length }
+  )
+  let n = ([ $want ($stored | length) ] | math min)
+  # `skip`, not `last`: this module exports a command named `last`, and a
+  # same-named export shadows the builtin inside the module too. see the note on
+  # the `last` command itself.
+  {
+    prefix: ($stored | first (($stored | length) - $n))
+    loaded: ($stored | skip (($stored | length) - $n))
+  }
 }
 
 # ── writing ──
@@ -223,6 +252,7 @@ export def record-of [
   --context-entries: list = []
   --parent: any
   --depth: int = 0
+  --handoff: any             # provenance, when the session came from another agent
 ]: nothing -> record {
   let created = (
     if $id != null and (exists $id) { (load $id | get --optional created | default "") } else { "" }
@@ -246,6 +276,7 @@ export def record-of [
     context_entries: ($context_entries | default [])
     parent: $parent
     depth: $depth
+    handoff: $handoff
   }
 }
 

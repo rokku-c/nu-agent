@@ -66,7 +66,7 @@ let results = [
 
   (case "session: list carries the fields a picker needs" {
     let row = (session list | first)
-    (eq "session: list carries the fields a picker needs" ($row | columns | sort) ["depth" "id" "messages" "model" "parent" "provider" "rounds" "status" "title" "updated"])
+    (eq "session: list carries the fields a picker needs" ($row | columns | sort) ["depth" "from" "id" "messages" "model" "parent" "provider" "rounds" "status" "title" "updated"])
   })
 
   (case "session: last returns the most recently updated" {
@@ -152,10 +152,86 @@ let results = [
     (is-true "session: prune --keep N deletes the rest" ((session list | length) == 1))
   })
 
+  # ── the window: what a resume loads, and what it must not lose ──
+  (case "session: window splits a history into prefix and loaded" {
+    let prior = {messages: [{role: "user", content: "1"} {role: "user", content: "2"} {role: "user", content: "3"}]}
+    let w = (session window $prior 2)
+    (eq "session: window splits a history into prefix and loaded" [($w.prefix | length) ($w.loaded | length)] [1 2])
+  })
+
+  (case "session: window with no tail loads everything" {
+    let prior = {messages: [{role: "user", content: "1"} {role: "user", content: "2"}]}
+    let w = (session window $prior null)
+    (eq "session: window with no tail loads everything" [($w.prefix | length) ($w.loaded | length)] [0 2])
+  })
+
+  (case "session: window takes the tail the session recorded" {
+    # a handoff sets one, because another agent's transcript is long
+    let prior = {messages: [{role: "user", content: "1"} {role: "user", content: "2"} {role: "user", content: "3"}], handoff: {tail: 1}}
+    let w = (session window $prior null)
+    (eq "session: window takes the tail the session recorded" ($w.loaded | length) 1)
+  })
+
+  (case "session: an explicit tail beats the one the session recorded" {
+    let prior = {messages: [{role: "user", content: "1"} {role: "user", content: "2"} {role: "user", content: "3"}], handoff: {tail: 1}}
+    let w = (session window $prior 3)
+    (eq "session: an explicit tail beats the one the session recorded" ($w.loaded | length) 3)
+  })
+
+  (case "session: a tail larger than the history loads all of it" {
+    let prior = {messages: [{role: "user", content: "1"}]}
+    let w = (session window $prior 99)
+    (eq "session: a tail larger than the history loads all of it" [($w.prefix | length) ($w.loaded | length)] [0 1])
+  })
+
+  (case "session: a fresh session has an empty window" {
+    let w = (session window null null)
+    (eq "session: a fresh session has an empty window" [($w.prefix | length) ($w.loaded | length)] [0 0])
+  })
+
+  # ── chat keeps a conversation ──
+  (case "session: agent chat writes a turn to a named session" {
+    if not (needs-creds) {
+      skipped "session: agent chat writes a turn to a named session" "no ANTHROPIC_AUTH_TOKEN"
+    } else {
+      agent chat "say nothing but the word: one" --session chatty --max-tokens 64 | ignore
+      let rec = (session load chatty)
+      (eq "session: agent chat writes a turn to a named session" [($rec.messages | length) ($rec.status)] [2 "chat"])
+    }
+  })
+
+  (case "session: a resumed chat sees the earlier turn" {
+    if not (needs-creds) {
+      skipped "session: a resumed chat sees the earlier turn" "no ANTHROPIC_AUTH_TOKEN"
+    } else {
+      agent chat "reply with just the number 41" --session numbers --max-tokens 128 | ignore
+      let r = (agent chat "what number did I ask for? reply with only it" --resume --session numbers --max-tokens 128 --json)
+      let rec = (session load numbers)
+      (is-true "session: a resumed chat sees the earlier turn" (
+        (($rec.messages | length) == 4) and (($r.content | to json -r) | str contains "41")
+      ))
+    }
+  })
+
+  (case "session: a resumed chat with a tail does NOT truncate the store" {
+    # the failure this guards: loading a window and then saving `prefix ++ this
+    # run`, but forgetting the prefix — which silently drops the older history
+    if not (needs-creds) {
+      skipped "session: a resumed chat with a tail does NOT truncate the store" "no ANTHROPIC_AUTH_TOKEN"
+    } else {
+      agent chat "remember the word marmalade, then say ok" --session tailed --max-tokens 128 | ignore
+      agent chat "and now say ok again" --resume --session tailed --max-tokens 128 | ignore
+      let before = ((session load tailed).messages | length)
+      agent chat "one more ok" --resume --session tailed --tail 2 --max-tokens 128 | ignore
+      let after = ((session load tailed).messages | length)
+      (eq "session: a resumed chat with a tail does NOT truncate the store" $after ($before + 2))
+    }
+  })
+
   # ── the invariant, with the loop actually running ──
   (case "session: a folded run stores the UNFOLDED history" {
     if not (needs-creds) {
-      skip "session: a folded run stores the UNFOLDED history" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "session: a folded run stores the UNFOLDED history" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       # a tiny budget forces the proactive fold, several times over. the stored
       # messages must be the real history: storing the working copy would put
@@ -173,7 +249,7 @@ let results = [
 
   (case "session: the working copy and the canonical copy can differ" {
     if not (needs-creds) {
-      skip "session: the working copy and the canonical copy can differ" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "session: the working copy and the canonical copy can differ" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let sid = "both-copies"
       let r = (agent "Use the calc tool three times: 1+1, 2+2, 3+3." --tools-from [calc] --session $sid --context-budget 600 --max-tokens 512 --json)

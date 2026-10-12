@@ -61,7 +61,12 @@ export def needs-creds []: nothing -> bool {
 # a skipped case. NOT a failure — the point is that it is neither a silent pass
 # nor a spurious failure: a suite that cannot run here must still say so, without
 # turning a credential-less checkout red.
-export def skip [name: string, reason: string]: nothing -> record {
+#
+# named `skipped`, not `skip`: `skip` is a nushell builtin (`$list | skip 2`), and
+# a suite imports this with `use ./harness.nu *` — a glob import that shadows the
+# builtin for every module parsed afterwards. that is not hypothetical: it broke
+# `session window` the moment a suite imported session.nu after the harness.
+export def skipped [name: string, reason: string]: nothing -> record {
   {name: $name, ok: true, skipped: true, detail: $reason}
 }
 

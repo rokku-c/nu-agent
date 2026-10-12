@@ -62,7 +62,7 @@ let results = [
   # ── the real thing ──
   (case "task: a subagent runs its own loop and returns a result" {
     if not (needs-creds) {
-      skip "task: a subagent runs its own loop and returns a result" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: a subagent runs its own loop and returns a result" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let out = (task "Use the calc tool to work out 21 * 2. Report just the number." --tools [calc] --max-rounds 4)
       (has "task: a subagent runs its own loop and returns a result" $out "42")
@@ -73,7 +73,7 @@ let results = [
     # without it, delegation looks free — and the parent's model has no signal to
     # limit how much of it it does
     if not (needs-creds) {
-      skip "task: the reply carries a cost footer" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: the reply carries a cost footer" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let out = (task "Use the calc tool for 3 * 3." --tools [calc] --max-rounds 4)
       (is-true "task: the reply carries a cost footer" (
@@ -84,7 +84,7 @@ let results = [
 
   (case "task: the subagent's transcript is stored with its own lineage" {
     if not (needs-creds) {
-      skip "task: the subagent's transcript is stored with its own lineage" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: the subagent's transcript is stored with its own lineage" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let before = ((session list) | length)
       task "Use the calc tool for 5 * 5." --tools [calc] --max-rounds 4 | ignore
@@ -98,7 +98,7 @@ let results = [
 
   (case "task: the stored transcript holds the child's REAL history" {
     if not (needs-creds) {
-      skip "task: the stored transcript holds the child's REAL history" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: the stored transcript holds the child's REAL history" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let r = (task "Use the calc tool for 7 * 6." --tools [calc] --max-rounds 4 --json)
       let rec = (session load $r.session)
@@ -112,7 +112,7 @@ let results = [
   (case "task: the child's own messages start from the task, not the parent's history" {
     # the whole point of delegating is a fresh context
     if not (needs-creds) {
-      skip "task: the child's own messages start from the task, not the parent's history" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: the child's own messages start from the task, not the parent's history" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let r = (task "Say only: done" --tools [calc] --max-rounds 2 --json)
       let rec = (session load $r.session)
@@ -125,7 +125,7 @@ let results = [
 
   (case "task: --json reports the counters without the footer text" {
     if not (needs-creds) {
-      skip "task: --json reports the counters without the footer text" "no ANTHROPIC_AUTH_TOKEN"
+      skipped "task: --json reports the counters without the footer text" "no ANTHROPIC_AUTH_TOKEN"
     } else {
       let r = (task "Say only: ok" --max-rounds 2 --json)
       (is-true "task: --json reports the counters without the footer text" (

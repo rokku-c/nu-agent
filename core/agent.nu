@@ -30,6 +30,8 @@ const DEFAULT_CONTEXT_BUDGET = 890_000
 
 use ./context.nu
 use ./expose.nu
+use ./handoff.nu
+use ./interactive.nu
 use ./markdown.nu
 use ./style.nu
 use ./mcp.nu
@@ -37,6 +39,15 @@ use ./policy.nu
 use ./session.nu
 use ./provider.nu
 use ../tools/image.nu
+
+# A flag that was not given and a flag given as "" mean the same thing: nothing.
+#
+# This exists because nushell cannot splat flags into a custom command — there is
+# no way to build a flag list and pass it — so the interactive mode has to spell
+# every flag on every turn and needs a way to say "unset". "" is that way.
+def unset [v: any]: nothing -> any {
+  if $v == null or $v == "" { null } else { $v }
+}
 
 # strip Claude Code style context markers (e.g. "deepseek-flash[1M]").
 # such suffixes are only CLI-internal aliases; sending them to the API as-is 404s.
@@ -354,6 +365,30 @@ def normalize-tools [raw: any]: nothing -> list {
 
 # ── public commands ──
 
+# the interactive mode. the loop lives in core/tui.nu; this is the entry point,
+# so the command sits with `agent chat` and `agent config` rather than off on
+# its own.
+export def tui [
+  --session (-S): string          # start or continue this session
+  --resume                        # continue the newest session
+  --tools-from: list<string> = ["read" "calc" "nu-shell"]
+  --model (-m): string
+  --provider (-p): string
+  --system (-s): string
+  --max-tokens (-t): int = 4096
+  --no-save
+]: nothing -> nothing {
+  # the turn is supplied here, because a module cannot see the caller's scope —
+  # see the note in interactive.nu. every flag goes on every turn with "" meaning
+  # unset, since nushell cannot build a flag list to splat into a custom command.
+  interactive repl --send {|t|
+    # straight into turn-run with values. going through `agent chat` would mean
+    # rebuilding a flag list, which nushell cannot splat into a custom command —
+    # and `turn-run` is the same code either way.
+    chat-turn $t
+  } --session ($session | default "") --resume=$resume --tools-from $tools_from --model ($model | default "") --provider ($provider | default "") --system ($system | default "") --max-tokens $max_tokens --no-save=$no_save
+}
+
 # show the config currently in effect (never the token contents)
 export def config [--provider (-p): string]: nothing -> record {
   let p = (dialect $provider)
@@ -368,41 +403,48 @@ export def config [--provider (-p): string]: nothing -> record {
   }
 }
 
-# send one message to the model, return the reply text
-export def chat [
-  prompt: string                  # the prompt to send
-  --system (-s): string           # system prompt
-  --model (-m): string            # model name, defaults to the provider's own env var
-  --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
-  --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
-  --max-tokens (-t): int = 2048   # max output tokens; note that thinking blocks also spend from it
-  --temperature (-T): float       # sampling temperature, server default when omitted
-  --timeout: duration = 120sec    # request timeout
-  --tools: list                   # tool definitions (expose output); supplying them can trigger tool_use
-  --show-thinking                 # print thinking blocks to stderr
-  --stream                        # print as it arrives: text→stdout, thinking→stderr
-  --md                            # render the reply as markdown (with --stream, render while streaming)
-  --image: list<path>             # attach images to the question (vision models only)
-  --json (-j)                     # return the full response record instead of plain text
+# One turn of a conversation, with every setting passed in.
+#
+# `chat` is the flag-parsing front end; this is the part with no flags at all.
+# the interactive mode already HAS the values, and nushell cannot build a flag
+# list to splat into a custom command — the record form (`...{flag: value}`)
+# insists on the flag's exact spelling, hyphens included, and still cannot carry
+# a conditional switch. so the caller passes values instead of reconstructing a
+# command line, and both paths run the same code.
+def turn-run [
+  p: string
+  messages: list
+  prefix: list
+  sid: any
+  save_it: bool
+  prompt: string
+  tools: any
+  system: any
+  model: string
+  max_tokens: int
+  temperature: any
+  timeout: duration
+  stream: bool
+  md: bool
+  show_thinking: bool
 ]: nothing -> any {
-  if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
-
-  let p = (dialect $provider)
-  let model = (strip-alias ($model | default (default-model $p)))
-  let tools = (normalize-tools $tools)
-
-
-  if $stream and $json {
-    error make { msg: "--stream and --json are mutually exclusive: streaming already printed the content, returning a record too would duplicate it" }
-  }
-
   let body = (
     if $stream {
-      stream-api-call $p [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout $show_thinking $md
+      stream-api-call $p $messages $tools $system $model $max_tokens $temperature $timeout $show_thinking $md
     } else {
-      api-call $p [{role: "user", content: (user-content $prompt $image)}] $tools $system $model $max_tokens $temperature $timeout
+      api-call $p $messages $tools $system $model $max_tokens $temperature $timeout
     }
   )
+
+  # the turn is written even when the reply is empty — a conversation that
+  # dropped its own question would resume into a lie
+  if $save_it {
+    let all = ($prefix | append $messages | append [{role: "assistant", content: ($body | get --optional content | default [])}])
+    (session record-of --id $sid --status "chat" --prompt $prompt --messages $all --provider $p --model $model --system $system --counters {
+      rounds: 1, tool_calls: ($body | get --optional content | default [] | where type == "tool_use" | length)
+      last_input_tokens: ($body | get --optional usage.input_tokens | default 0), stop_reason: ($body | get --optional stop_reason | default "")
+    }) | session store | ignore
+  }
 
   let thinking = (blocks-of $body "thinking" | get --optional thinking | default [] | str join (char nl))
   let calls = (blocks-of $body "tool_use")
@@ -427,7 +469,8 @@ export def chat [
         print -e $"warning: the stream ended without receiving anything, stop_reason=($stop); try a larger --max-tokens"
       }
     }
-    return null
+    # the body is still returned: the caller decides whether to show it, and a
+    # `--json` streamed run wants the record
   }
 
   # the model may burn the whole budget on thinking, or decide to call tools without
@@ -442,7 +485,123 @@ export def chat [
     print -e "warning: truncated by max_tokens, the reply may be incomplete"
   }
 
-  if $json { $body } else if $md { $text | markdown render } else { $text }
+  $body
+}
+
+# one interactive turn, from a record of values.
+#
+# the session work is `chat`'s, so this mirrors the front end — but it takes a
+# record rather than flags because a closure cannot be handed a command line.
+def chat-turn [t: record]: nothing -> any {
+  let p = (dialect (unset $t.provider))
+  let prior = (
+    if $t.resume and ($t.session | is-empty) { session last }     else if $t.resume { session load $t.session }     else { null }
+  )
+  let w = (session window $prior null)
+  let prefix = $w.prefix
+  let history = $w.loaded
+  let explicit_id = (if ($t.session | is-not-empty) { $t.session } else { null })
+  let save_it = ((not ($t.no_save | default false)) and (($explicit_id != null) or ($prior != null)))
+  let sid = ($explicit_id | default (if $prior != null { $prior | get --optional id } else { null }))
+
+  let handoff_note = (
+    if $prior == null or (($prior | get --optional handoff) == null) { "" }     else { handoff note $prior.handoff ($history | length) ($prior.handoff | get --optional messages | default 0) }
+  )
+  let system = (unset $t.system)
+  let system = (
+    if ($handoff_note | is-empty) { $system }     else if $system == null { $handoff_note }     else { $"($system)
+
+---
+
+($handoff_note)" }
+  )
+  let model = (strip-alias ((unset $t.model) | default (
+    if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
+  )))
+  let from_modules = ($t.tools | default [] | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
+  let tools = (normalize-tools $from_modules)
+
+  let messages = ($history | append {role: "user", content: $t.line})
+  turn-run $p $messages $prefix $sid $save_it $t.line $tools $system $model $t.max_tokens null 120sec true true false
+}
+
+# send one message to the model, return the reply text
+export def chat [
+  prompt: string                  # the prompt to send
+  --system (-s): string           # system prompt
+  --model (-m): string            # model name, defaults to the provider's own env var
+  --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
+  --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
+  --max-tokens (-t): int = 2048   # max output tokens; note that thinking blocks also spend from it
+  --temperature (-T): float       # sampling temperature, server default when omitted
+  --timeout: duration = 120sec    # request timeout
+  --tools: list                   # tool definitions (expose output); supplying them can trigger tool_use
+  --show-thinking                 # print thinking blocks to stderr
+  --stream                        # print as it arrives: text→stdout, thinking→stderr
+  --md                            # render the reply as markdown (with --stream, render while streaming)
+  --image: list<path>             # attach images to the question (vision models only)
+  --json (-j)                     # return the full response record instead of plain text
+  --session (-S): string          # keep this conversation in a session, and add to it
+  --resume                        # continue --session (or the newest session) instead of starting fresh
+  --tail: int                     # on resume, load only the last N messages
+  --no-save                       # run without writing to the session store
+  --tools-from: list<string>      # module names to expose, instead of pre-resolved --tools
+]: nothing -> any {
+  if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
+
+  let p = (dialect $provider)
+
+  # ── the conversation so far ──
+  # `chat` is one turn, but a session makes it the next turn of a conversation —
+  # which is what makes it usable interactively (see tui.nu). the resume rules
+  # are the loop's, so a chat and a tool run can share one session.
+  if $resume and ($session | is-empty) and ((session list) | is-empty) {
+    error make { msg: "--resume given but the session store is empty" }
+  }
+  if ($session | is-not-empty) and (not $resume) and (session exists $session) {
+    error make { msg: $"session ($session) already exists. pass --resume to continue it, or pick another id" }
+  }
+  let prior = (
+    if $resume and ($session | is-empty) { session last }     else if $resume { session load $session }     else { null }
+  )
+  let w = (session window $prior $tail)
+  let prefix = $w.prefix
+  let history = $w.loaded
+  let explicit_id = (if ($session | is-not-empty) { $session } else { null })
+  let save_it = ((not $no_save) and (($explicit_id != null) or ($prior != null)))
+  let sid = ($explicit_id | default (if $prior != null { $prior | get --optional id } else { null }))
+
+  # a resumed handoff says where it came from, exactly as in the loop
+  let handoff_note = (
+    if $prior == null or (($prior | get --optional handoff) == null) { "" }     else { handoff note $prior.handoff ($history | length) ($prior.handoff | get --optional messages | default 0) }
+  )
+  let system = (unset $system)
+  let system = (
+    if ($handoff_note | is-empty) { $system }     else if $system == null { $handoff_note }     else { $"($system)
+
+---
+
+($handoff_note)" }
+  )
+  let model = (strip-alias ((unset $model) | default (
+    if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
+  )))
+  let from_modules = ($tools_from | default [] | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
+  let tools = (normalize-tools ($tools | append $from_modules))
+
+  mut messages = $history
+  $messages = ($messages | append {role: "user", content: (user-content $prompt $image)})
+
+
+  if $stream and $json {
+    error make { msg: "--stream and --json are mutually exclusive: streaming already printed the content, returning a record too would duplicate it" }
+  }
+
+  let body = (turn-run $p $messages $prefix $sid $save_it $prompt $tools $system $model $max_tokens $temperature $timeout $stream $md $show_thinking)
+
+  # streaming already printed the text; returning it too would show it twice
+  if $stream { return null }
+  if $json { $body } else if $md { (text-of $body) | markdown render } else { text-of $body }
 }
 
 # decide whether an API error is a "context overflow".
@@ -580,6 +739,7 @@ export def main [
   --session (-S): string          # session id to write to; "new" or absent means an ad-hoc run
   --resume                        # continue --session, or the newest session when no id is given
   --no-save                       # run without writing anything to the session store
+  --tail: int                     # on resume, load only the last N messages (default: the session's own, else all)
 ]: nothing -> any {
   if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
 
@@ -602,9 +762,9 @@ export def main [
 
   # precedence: explicit flag > stored session > environment/inference
   let p = (
-    if ($provider | is-not-empty) { $provider }     else if $prior != null and ((($prior | get --optional provider | default "") | is-not-empty)) { $prior.provider }     else { dialect null }
+    if (unset $provider) != null { $provider }     else if $prior != null and ((($prior | get --optional provider | default "") | is-not-empty)) { $prior.provider }     else { dialect null }
   )
-  let model = (strip-alias ($model | default (
+  let model = (strip-alias ((unset $model) | default (
     if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
   )))
   # the system prompt is merged here and NOT inside the skill join below,
@@ -678,12 +838,40 @@ export def main [
 
 "
   )
+  # ── the resume window ──
+  # computed once, before the system prompt, so the note that describes the
+  # window and the loop that opens it cannot disagree about its size.
+  #
+  # `prefix` is the part of a resumed history that is NOT loaded. it stays in the
+  # store and is written back on every save, so loading a window never truncates
+  # the session — that distinction is the entire point of a tail.
+  let w = (session window $prior $tail)
+  let prefix = $w.prefix
+  let loaded = $w.loaded
+  let loaded_n = ($loaded | length)
+
+  # a resumed handoff says where it came from, that older history was not loaded,
+  # and that the tools named in it are not this runtime's. composed per request,
+  # never stored, so the stored `system` stays what the caller actually asked for.
+  let handoff_note = (
+    if $prior == null or (($prior | get --optional handoff) == null) { "" }     else { handoff note $prior.handoff $loaded_n ($prior.handoff | get --optional messages | default 0) }
+  )
+
   let sys = (
     if ($skill_text | is-empty) { $system }     else if $system == null { $skill_text }     else { $"($system)
 
 ---
 
 ($skill_text)" }
+  )
+  # the handoff note rides on the end, so it cannot displace what the caller asked
+  # for. it is composed per request and never stored.
+  let sys = (
+    if ($handoff_note | is-empty) { $sys }     else if $sys == null { $handoff_note }     else { $"($sys)
+
+---
+
+($handoff_note)" }
   )
 
   # ── attached MCP servers ──
@@ -729,13 +917,9 @@ export def main [
   # append-only and folding never touches it, which is what makes a session
   # resumable: saving $messages would persist `[folded] item 7` placeholders and
   # fold them again on resume. see the invariant at the top of session.nu.
-  mut messages = []
-  mut canonical = []
-  if $prior != null {
-    let stored = ($prior | get --optional messages | default [])
-    $messages = $stored
-    $canonical = $stored
-  }
+  mut messages = $loaded
+  mut canonical = $loaded
+
   $messages = ($messages | append {role: "user", content: (user-content $prompt $image)})
   $canonical = ($canonical | append {role: "user", content: (user-content $prompt $image)})
   mut done = false
@@ -902,7 +1086,7 @@ export def main [
     # that dies at round 30 — a crash, a Ctrl-C, an expired token — should leave
     # something resumable rather than nothing.
     if $save_session {
-      (session record-of --id $session_id --status "running" --prompt $prompt --messages $canonical --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
+      (session record-of --id $session_id --status "running" --prompt $prompt --messages ($prefix | append $canonical) --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
         context_budget: $context_budget, keep_recent: $keep_recent
         max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
       } --counters {
@@ -935,7 +1119,7 @@ export def main [
   )
   mut stored_id = (if $save_session { $session_id } else { null })
   if $save_session {
-    $stored_id = (session record-of --id $session_id --status $final_status --prompt $prompt --messages $canonical --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
+    $stored_id = (session record-of --id $session_id --status $final_status --prompt $prompt --messages ($prefix | append $canonical) --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
       context_budget: $context_budget, keep_recent: $keep_recent
       max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
     } --counters {
