@@ -89,7 +89,7 @@ export def last []: nothing -> any {
 # the declared table return. `[] | select <cols>` is an empty list carrying the
 # right columns.
 def empty-table []: nothing -> table {
-  [] | select id updated status provider model title rounds messages
+  [] | select id updated status provider model title rounds messages parent depth
 }
 
 export def list []: nothing -> table {
@@ -110,6 +110,8 @@ export def list []: nothing -> table {
         title: ($e | get --optional title | default "" | str substring 0..50)
         rounds: ($e | get --optional counters.rounds | default 0)
         messages: (($e | get --optional messages | default []) | length)
+        parent: ($e | get --optional parent | default null)
+        depth: ($e | get --optional depth | default 0)
       }
     }
   | compact
@@ -200,24 +202,28 @@ export def store []: record -> string {
 
 # build a session record from a finished run. kept here rather than in the loop
 # so the shape lives next to the reader.
+#
+# named flags, not seventeen positionals: the first version took positionals and
+# two of the three call sites passed a subtly wrong arity, which surfaces as a
+# type error about whatever parameter the shift happened to land on.
 export def record-of [
-  id: any
-  status: string
-  prompt: string
-  messages: list
-  provider: string
-  model: string
-  system: any
-  skill: any
-  tools_from: any
-  mcp: any
-  images: any
-  budget: record
-  counters: record
-  folds: list
-  context_entries: list
-  parent: any
-  depth: int
+  --id: string
+  --status: string = "done"
+  --prompt: string = ""
+  --messages: list = []          # the CANONICAL list — see the invariant above
+  --provider: string = ""
+  --model: string = ""
+  --system: any
+  --skill: any = []
+  --tools-from: any = []         # module names, re-resolved on resume
+  --mcp: any = []
+  --images: any = []             # paths, never base64
+  --budget: record = {}
+  --counters: record = {}
+  --folds: list = []
+  --context-entries: list = []
+  --parent: any
+  --depth: int = 0
 ]: nothing -> record {
   let created = (
     if $id != null and (exists $id) { (load $id | get --optional created | default "") } else { "" }
@@ -234,7 +240,7 @@ export def record-of [
     tools: {modules: ($tools_from | default []), mcp: ($mcp | default [])}
     cwd: ($env.PWD | into string)
     budget: $budget
-    messages: $messages
+    messages: ($messages | default [])
     images: ($images | default [])
     counters: $counters
     folds: ($folds | default [])

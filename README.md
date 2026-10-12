@@ -89,6 +89,9 @@ agent "open an issue titled 'hi'" --mcp [["npx" "-y" "@modelcontextprotocol/serv
 # a browsable trace of the run
 agent "…" --tools $tools --json | trace write run.html
 
+# delegation: the model gets a `task` tool that starts a nested run
+agent "audit every file under src/ for unwrap() and summarise" --tools-from [read bash nu-shell task]
+
 # sessions: opt-in, and ephemeral unless you ask
 agent "start something" --session my-run --tools-from [read write bash]
 agent "carry on" --resume --session my-run
@@ -124,7 +127,7 @@ core/     the runtime — not offered to the model
   context.nu      context capture and folding
   policy.nu       the tool permission gate (opt-in; default allow)
   session.nu      persist a run and resume it later (opt-in; default ephemeral)
-  task.nu         (planned) subagent orchestration
+  task.nu         delegate a subtask to a nested run (the `task` tool)
   markdown.nu     markdown rendered for a terminal
   style.nu        ANSI colour, off automatically when piped
   mcp.nu          MCP client
@@ -136,7 +139,7 @@ core/     the runtime — not offered to the model
   quote.nu        POSIX quoting
 
 tools/    the capabilities — these become the model's tools
-test/     unit · resolve · stream · policy · session · mcp · e2e
+test/     unit · resolve · stream · policy · session · task · mcp · e2e
 ```
 
 **A file's name is its public tool name.** `tools/read.nu` exports `main`, so
@@ -196,6 +199,7 @@ nu test/run.nu unit mcp     # or just some suites
 | `stream` | the SSE state machine, replayed from canned bytes — thinking, tool fragments, no-SSE errors |
 | `policy` | the permission gate: matching, refusal wording, deferral, and enforcement through the tool executor |
 | `session` | persistence and resume, including the invariant that a folded run stores its unfolded history |
+| `task` | subagents: depth and capability guards, lineage, and the stored child transcript |
 | `mcp` | the real server over real stdio, including stdout purity |
 | `e2e` | a real model endpoint — tool round-trip, streaming, images, traces |
 
@@ -241,8 +245,12 @@ The runtime is whole; what is missing is the machinery around it. In order:
    carries an append-only `canonical` list that folding never touches, and that
    is what gets stored — a run whose context was folded still resumes with its
    real history.
-4. **task** — subagents. Falls out of the design almost free, because a tool
-   already runs out-of-process: a subagent is a nested loop in that child.
+4. ~~**task**~~ — done, see `core/task.nu`. It did fall out nearly free: a tool
+   already runs out-of-process, so a subagent is a nested loop in that child. The
+   work was in the guard rails — a child may narrow its parent's capabilities and
+   policy but never widen them, and it is handed the parent's *compiled* rules
+   rather than a path, so it cannot escape by pointing `NU_POLICY_FILE` somewhere
+   empty.
 
 ## License
 

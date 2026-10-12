@@ -56,5 +56,6 @@ use ../core/mcp.nu
 # exercise its rule matching directly rather than only through a live run
 use ../core/policy.nu
 use ../core/session.nu
+use ../core/task.nu
 use ../core/style.nu
 use ../core/trace.nu

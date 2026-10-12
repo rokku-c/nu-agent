@@ -17,6 +17,7 @@ const SUITES = [
   {name: "stream",  covers: "the SSE state machine, replayed from canned bytes"}
   {name: "policy",  covers: "the tool permission gate"}
   {name: "session", covers: "persistence, resume and the unfolded-history invariant"}
+  {name: "task",    covers: "subagent orchestration, depth and capability guards"}
   {name: "mcp",     covers: "the MCP server over real stdio"}
   {name: "e2e",     covers: "a real model endpoint (needs credentials)"}
 ]

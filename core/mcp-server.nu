@@ -25,6 +25,12 @@
 # the model recursively spawn the top-level loop), plus `policy`, `expose`, `mcp`
 # and the provider internals — those are runtime machinery, not capabilities.
 #
+# `session` is absent for a narrower reason: the model has a real use for
+# reading a stored transcript, but the module also carries the writers
+# (`session store`, `prune`, `record-of`), and the allowlist is per module, not
+# per command. lending the model eleven tools so it can reach two of them is the
+# wrong trade — and `nu-shell` already reaches all of them.
+#
 # ── protocol notes ──
 # stdio transport, newline-delimited JSON-RPC 2.0. **stdout may carry protocol
 # messages only** — one extra character makes the client fail to parse, so:
@@ -56,7 +62,7 @@ const SERVER_NAME = "agent"
 const SERVER_VERSION = "0.1.0"
 
 # the capabilities this server lends out — the contract, in one place.
-const TOOL_MODULES = ["read" "write" "bash" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon"]
+const TOOL_MODULES = ["read" "write" "bash" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon" "task"]
 # the default when NU_MCP_MODULES is unset: the six most useful to a coding agent
 const DEFAULT_MODULES = ["nu-shell" "read" "write" "bash" "calc" "host"]
 

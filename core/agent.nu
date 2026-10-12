@@ -641,6 +641,11 @@ export def main [
   let parent = ($env.NU_AGENT_SESSION? | default null)
   let depth = (($env.NU_AGENT_DEPTH? | default "0") | into int)
   if $save_session { $env.NU_AGENT_SESSION = $session_id }
+  # the capability set, for a subagent to narrow itself against. exported as an
+  # env var because a subagent runs behind a process boundary, and a child that
+  # could name a tool its parent never had would make the parent's restrictions
+  # decorative.
+  $env.NU_AGENT_TOOLS = ($tools_from | str join ",")
 
   # skills are stored as PATHS on resume, so an edited SKILL.md is re-read
   let skill = (
@@ -906,13 +911,13 @@ export def main [
     # that dies at round 30 — a crash, a Ctrl-C, an expired token — should leave
     # something resumable rather than nothing.
     if $save_session {
-      (session record-of $session_id "running" $prompt $canonical $p $model $system $skill $tools_from $mcp $image {
+      (session record-of --id $session_id --status "running" --prompt $prompt --messages $canonical --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
         context_budget: $context_budget, keep_recent: $keep_recent
         max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
-      } {
+      } --counters {
         rounds: $rounds, tool_calls: $tool_calls
         last_input_tokens: $last_tokens, stop_reason: $stop_reason
-      } $folds $entries $parent $depth) | session store | ignore
+      } --folds $folds --context-entries $entries --parent $parent --depth $depth) | session store | ignore
     }
   }
 
@@ -939,13 +944,13 @@ export def main [
   )
   mut stored_id = (if $save_session { $session_id } else { null })
   if $save_session {
-    $stored_id = ((session record-of $session_id $final_status $prompt $canonical $p $model $system $skill $tools_from $mcp $image {
+    $stored_id = (session record-of --id $session_id --status $final_status --prompt $prompt --messages $canonical --provider $p --model $model --system $system --skill $skill --tools-from $tools_from --mcp $mcp --images $image --budget {
       context_budget: $context_budget, keep_recent: $keep_recent
       max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
-    } {
+    } --counters {
       rounds: $rounds, tool_calls: $tool_calls
       last_input_tokens: $last_tokens, stop_reason: $stop_reason
-    } $folds $entries $parent $depth) | session store)
+    } --folds $folds --context-entries $entries --parent $parent --depth $depth | session store)
   }
 
   let final = {

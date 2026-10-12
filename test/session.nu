@@ -66,7 +66,7 @@ let results = [
 
   (case "session: list carries the fields a picker needs" {
     let row = (session list | first)
-    (eq "session: list carries the fields a picker needs" ($row | columns | sort) ["id" "messages" "model" "provider" "rounds" "status" "title" "updated"])
+    (eq "session: list carries the fields a picker needs" ($row | columns | sort) ["depth" "id" "messages" "model" "parent" "provider" "rounds" "status" "title" "updated"])
   })
 
   (case "session: last returns the most recently updated" {
