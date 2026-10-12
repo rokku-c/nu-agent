@@ -1,0 +1,289 @@
+<title>Agent Trace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef1f4;
+    --ink: #12181d;
+    --muted: #5b6773;
+    --line: #e0e5ea;
+    --accent: #0b6d80;
+    --accent-soft: #d7eef2;
+    --ok: #2b7a3d;
+    --warn: #9a6b00;
+    --err: #b3261e;
+    --radius: 8px;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1418;
+      --surface: #161d23;
+      --surface-2: #1c242b;
+      --ink: #e5eaf0;
+      --muted: #93a1ae;
+      --line: #26313a;
+      --accent: #45b3c7;
+      --accent-soft: #12333b;
+      --ok: #5fbf74;
+      --warn: #d8ab3a;
+      --err: #ef6d63;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1418;
+    --surface: #161d23;
+    --surface-2: #1c242b;
+    --ink: #e5eaf0;
+    --muted: #93a1ae;
+    --line: #26313a;
+    --accent: #45b3c7;
+    --accent-soft: #12333b;
+    --ok: #5fbf74;
+    --warn: #d8ab3a;
+    --err: #ef6d63;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding-block: 32px 64px;
+    padding-inline: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  header h1 {
+    font-size: 1.45rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .task {
+    color: var(--muted);
+    margin: 0;
+    max-width: 68ch;
+  }
+
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    min-width: 96px;
+  }
+  .stat dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 0;
+  }
+  .stat dd {
+    margin: 2px 0 0;
+    font-family: var(--mono);
+    font-size: 1rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .round {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .round-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .round-head h2 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin: 0;
+    color: var(--accent);
+  }
+  .round-head .meta {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .round-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .say { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-width: 72ch; }
+
+  details.call {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    background: var(--paper);
+  }
+  details.call[data-err="true"] { border-left-color: var(--err); }
+  details.call > summary {
+    cursor: pointer;
+    padding: 9px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    list-style: none;
+  }
+  details.call > summary::-webkit-details-marker { display: none; }
+  details.call > summary::before {
+    content: "▸";
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+  details.call[open] > summary::before { content: "▾"; }
+  details.call > summary:hover { background: var(--surface-2); }
+  details.call > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tool-name { font-weight: 500; color: var(--accent); }
+  .tool-args { color: var(--muted); overflow-wrap: anywhere; }
+  .tool-size { margin-left: auto; color: var(--muted); font-size: 0.72rem; }
+
+  .call-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .call-body h4 {
+    margin: 0;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  pre {
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    max-height: 460px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .fold {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .fold code { font-family: var(--mono); color: var(--ink); }
+
+  .empty { color: var(--muted); font-style: italic; }
+  @media (max-width: 400px) {
+    .round-head { flex-wrap: wrap; }
+    .tool-size { margin-left: 0; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="title">Agent Trace</h1>
+    <p class="task" id="task"></p>
+    <dl class="stats" id="stats"></dl>
+  </header>
+  <main id="rounds"></main>
+</div>
+
+<script id="trace-data" type="application/json">/*__TRACE_DATA__*/</script>
+<script>
+(function () {
+  var trace = {};
+  try {
+    var b64 = document.getElementById("trace-data").textContent.trim();
+    trace = JSON.parse(decodeURIComponent(escape(atob(b64))));
+  } catch (e) {}
+
+  var esc = function (s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  };
+
+  if (trace.title) document.getElementById("title").textContent = trace.title;
+  document.getElementById("task").textContent = trace.task || "";
+
+  var stats = trace.stats || {};
+  var order = [
+    ["rounds", "rounds"], ["tool calls", "tool_calls"],
+    ["input tokens", "last_input_tokens"], ["stop reason", "stop_reason"],
+  ];
+  document.getElementById("stats").innerHTML = order
+    .filter(function (p) { return stats[p[1]] != null && stats[p[1]] !== ""; })
+    .map(function (p) {
+      return '<div class="stat"><dt>' + esc(p[0]) + '</dt><dd>' + esc(stats[p[1]]) + '</dd></div>';
+    }).join("");
+
+  var rounds = trace.rounds || [];
+  if (!rounds.length) {
+    document.getElementById("rounds").innerHTML = '<p class="empty">No rounds recorded.</p>';
+    return;
+  }
+
+  document.getElementById("rounds").innerHTML = rounds.map(function (r) {
+    var tools = (r.tools || []).map(function (t) {
+      var args = t.args_preview ? t.args_preview : JSON.stringify(t.input || {});
+      var size = (t.result || "").length;
+      return '<details class="call" data-err="' + (t.is_error ? "true" : "false") + '">' +
+        '<summary><span class="tool-name">' + esc(t.name) + '</span>' +
+        '<span class="tool-args">' + esc(args) + '</span>' +
+        '<span class="tool-size">' + size + ' chars</span></summary>' +
+        '<div class="call-body">' +
+        '<h4>input</h4><pre>' + esc(JSON.stringify(t.input || {}, null, 2)) + '</pre>' +
+        '<h4>result</h4><pre>' + esc(t.result || "(empty)") + '</pre>' +
+        '</div></details>';
+    }).join("");
+
+    var folds = (r.folds || []).map(function (f) {
+      return '<div class="fold">context folded — ' + esc(f.count) + ' item(s) &rarr; <code>' +
+        esc(f.entry) + '</code></div>';
+    }).join("");
+
+    var say = r.text ? '<p class="say">' + esc(r.text) + '</p>' : "";
+    var meta = r.tokens != null ? r.tokens + " tokens" : "";
+
+    return '<section class="round">' +
+      '<div class="round-head"><h2>Round ' + esc(r.n) + '</h2>' +
+      '<span class="meta">' + esc(meta) + '</span></div>' +
+      '<div class="round-body">' + say + folds + tools + '</div></section>';
+  }).join("");
+})();
+</script>
