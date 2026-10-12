@@ -29,10 +29,12 @@ const DEFAULT_MAX_OUTPUT = 8000
 const DEFAULT_CONTEXT_BUDGET = 890_000
 
 use ./context.nu
+use ./expose.nu
 use ./markdown.nu
 use ./style.nu
 use ./mcp.nu
 use ./policy.nu
+use ./session.nu
 use ./provider.nu
 use ../tools/image.nu
 
@@ -574,12 +576,78 @@ export def main [
   --mcp: list<list<string>>       # attach MCP servers; each entry is that server's argv
   --skill: list<path>             # mount SKILL.md files explicitly; their body joins the system prompt
   --image: list<path>             # attach images to the opening question (vision models only)
+  --tools-from: list<string>      # module names to expose, instead of pre-resolved --tools
+  --session (-S): string          # session id to write to; "new" or absent means an ad-hoc run
+  --resume                        # continue --session, or the newest session when no id is given
+  --no-save                       # run without writing anything to the session store
 ]: nothing -> any {
   if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
 
-  let p = (dialect $provider)
-  let model = (strip-alias ($model | default (default-model $p)))
-  let tools = (normalize-tools $tools)
+  # ── resume ──
+  # the stored record supplies the DEFAULTS; an explicit flag overrides it. that
+  # is the only rule that does not surprise, and it is why the merge happens
+  # here, before --system is consumed by the skill join below.
+  #
+  # refusing to append to an existing session without --resume is deliberate:
+  # silently clobbering a stored run is the failure worth engineering against.
+  if $resume and ($session | is-empty) and ((session list) | is-empty) {
+    error make { msg: "--resume given but the session store is empty" }
+  }
+  if ($session | is-not-empty) and (not $resume) and (session exists $session) {
+    error make { msg: $"session ($session) already exists. pass --resume to continue it, or pick another id — silently appending to it is the failure this guards against." }
+  }
+  let prior = (
+    if $resume and ($session | is-empty) { session last }
+    else if $resume { session load $session }
+    else { null }
+  )
+
+  # precedence: explicit flag > stored session > environment/inference
+  let p = (
+    if ($provider | is-not-empty) { $provider }
+    else if $prior != null and ((($prior | get --optional provider | default "") | is-not-empty)) { $prior.provider }
+    else { dialect null }
+  )
+  let model = (strip-alias ($model | default (
+    if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
+  )))
+  # the system prompt is merged here and NOT inside the skill join below,
+  # because that join consumes whatever --system holds
+  let system = (
+    if $system != null { $system }
+    else if $prior != null { ($prior | get --optional system) }
+    else { null }
+  )
+
+  # tools come from module names when given — and on resume they are taken from
+  # the record as NAMES, so the set is re-resolved rather than replayed from a
+  # frozen schema list
+  let tools_from = (
+    if ($tools_from | is-empty) and $prior != null { ($prior | get --optional tools.modules | default []) } else { ($tools_from | default []) }
+  )
+  let from_modules = ($tools_from | each {|m| expose from-module $m } | flatten)
+  let tools = (normalize-tools ($tools | append $from_modules))
+
+  # ── session bookkeeping ──
+  # ephemeral unless asked otherwise. a run with no --session and no --resume
+  # writes nothing, which keeps the default behaviour exactly what it was.
+  let explicit_id = (if ($session | is-not-empty) { $session } else { null })
+  let resume_id = (if $prior != null { ($prior | get --optional id) } else { null })
+  let save_session = ((not $no_save) and (($explicit_id != null) or ($resume_id != null)))
+  # one id, decided once: the per-round write must not mint a new one each time
+  let session_id = ($explicit_id | default $resume_id | default "")
+  # lineage, for a nested run to report its parent. carried in the environment so
+  # it survives the process boundary a subagent runs behind.
+  let parent = ($env.NU_AGENT_SESSION? | default null)
+  let depth = (($env.NU_AGENT_DEPTH? | default "0") | into int)
+  if $save_session { $env.NU_AGENT_SESSION = $session_id }
+
+  # skills are stored as PATHS on resume, so an edited SKILL.md is re-read
+  let skill = (
+    if ($skill | is-not-empty) { $skill }
+    else if $prior != null { ($prior | get --optional skill | default []) }
+    else { [] }
+  )
 
   # ── explicitly mounted skills ──
   # Each file's body is appended to the system prompt. Frontmatter is dropped:
@@ -661,8 +729,19 @@ export def main [
   # that would narrow $messages' type to content: string, and appending an assistant
   # message carrying content blocks (a list) later gives type_mismatch.
   # an empty list infers as list<any>, which keeps the flexibility.
+  # $messages is the WORKING copy — folding rewrites it in place. $canonical is
+  # append-only and folding never touches it, which is what makes a session
+  # resumable: saving $messages would persist `[folded] item 7` placeholders and
+  # fold them again on resume. see the invariant at the top of session.nu.
   mut messages = []
+  mut canonical = []
+  if $prior != null {
+    let stored = ($prior | get --optional messages | default [])
+    $messages = $stored
+    $canonical = $stored
+  }
   $messages = ($messages | append {role: "user", content: (user-content $prompt $image)})
+  $canonical = ($canonical | append {role: "user", content: (user-content $prompt $image)})
   mut done = false
   mut text = ""
   mut rounds = 0
@@ -745,6 +824,7 @@ export def main [
     let reply = (text-of $body)
     # this round's assistant message must be carried verbatim, thinking blocks included -- drop the signature and the server rejects it
     $messages = ($messages | append {role: "assistant", content: $blocks})
+    $canonical = ($canonical | append {role: "assistant", content: $blocks})
     $rounds = $rounds + 1
 
     if $verbose and ($last_tokens > 0) {
@@ -815,10 +895,24 @@ export def main [
           $r
         })
       $messages = ($messages | append {role: "user", content: $results})
+      $canonical = ($canonical | append {role: "user", content: $results})
       $tool_calls = $tool_calls + ($calls | length)
       # tool results are usually the bulk, so they must count toward the next estimate (rough: chars / 3)
       let added = (($results | to json -r | str length) / 3 | math ceil)
       $est_next = ($last_tokens + $added)
+    }
+
+    # persist at the END OF EACH ROUND, not just when the run finishes. a run
+    # that dies at round 30 — a crash, a Ctrl-C, an expired token — should leave
+    # something resumable rather than nothing.
+    if $save_session {
+      (session record-of $session_id "running" $prompt $canonical $p $model $system $skill $tools_from $mcp $image {
+        context_budget: $context_budget, keep_recent: $keep_recent
+        max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
+      } {
+        rounds: $rounds, tool_calls: $tool_calls
+        last_input_tokens: $last_tokens, stop_reason: $stop_reason
+      } $folds $entries $parent $depth) | session store | ignore
     }
   }
 
@@ -840,9 +934,28 @@ export def main [
     vprint $"- folded ($folds | length) times this run; original context: ($entries | each {|e| $"`($e)`" } | str join ', ')"
   }
 
+  let final_status = (
+    if (not $done) { "capped" } else if (($text | str trim) | is-empty) { "empty" } else { "done" }
+  )
+  mut stored_id = (if $save_session { $session_id } else { null })
+  if $save_session {
+    $stored_id = ((session record-of $session_id $final_status $prompt $canonical $p $model $system $skill $tools_from $mcp $image {
+      context_budget: $context_budget, keep_recent: $keep_recent
+      max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
+    } {
+      rounds: $rounds, tool_calls: $tool_calls
+      last_input_tokens: $last_tokens, stop_reason: $stop_reason
+    } $folds $entries $parent $depth) | session store)
+  }
+
   let final = {
+    # `messages` is the WORKING copy and may contain fold placeholders; `canonical`
+    # is the real history. both are returned so a caller can see the difference,
+    # but only `canonical` is safe to persist or resume from.
     messages: $messages
+    canonical: $canonical
     done: $done
+    status: $final_status
     text: $text
     rounds: $rounds
     tool_calls: $tool_calls
@@ -850,7 +963,9 @@ export def main [
     stop_reason: $stop_reason
     context_entries: $entries
     folds: $folds
+    session: $stored_id
   }
+
 
   # streaming already printed the text; returning a copy would show it twice in the terminal
   if $stream { return null }

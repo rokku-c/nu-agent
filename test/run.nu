@@ -16,6 +16,7 @@ const SUITES = [
   {name: "resolve", covers: "module resolution + the naming contract"}
   {name: "stream",  covers: "the SSE state machine, replayed from canned bytes"}
   {name: "policy",  covers: "the tool permission gate"}
+  {name: "session", covers: "persistence, resume and the unfolded-history invariant"}
   {name: "mcp",     covers: "the MCP server over real stdio"}
   {name: "e2e",     covers: "a real model endpoint (needs credentials)"}
 ]
