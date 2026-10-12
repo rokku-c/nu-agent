@@ -171,8 +171,7 @@ export def show [
         role: ($m | get --optional role | default "?")
         kind: $kind
         preview: (
-          if $kind == "blocks" { $"($c | length) blocks" }
-          else { ($c | into string | str substring 0..( [ 70 ($c | into string | str length) ] | math min )) }
+          if $kind == "blocks" { $"($c | length) blocks" }           else { ($c | into string | str substring 0..( [ 70 ($c | into string | str length) ] | math min )) }
         )
       }
     }

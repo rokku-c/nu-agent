@@ -14,6 +14,7 @@
 const SUITES = [
   {name: "unit",    covers: "pure functions, no network"}
   {name: "resolve", covers: "module resolution + the naming contract"}
+  {name: "openai",  covers: "the OpenAI dialect's translation and stream state"}
   {name: "stream",  covers: "the SSE state machine, replayed from canned bytes"}
   {name: "policy",  covers: "the tool permission gate"}
   {name: "session", covers: "persistence, resume and the unfolded-history invariant"}

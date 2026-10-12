@@ -20,7 +20,7 @@ let no_flush = {|st, o| {state: $st, out: ""}}
 # feed raw SSE lines through the dialect and the state machine
 def replay [lines: list<string>]: nothing -> record {
   $lines | reduce --fold (stream seed) {|l, acc|
-    stream step-line $l $acc {|line| anthropic events $line } false true false $no_md $no_flush
+    stream step-line $l $acc {|line, st| anthropic events $line $st } false true false $no_md $no_flush
   }
 }
 
@@ -137,13 +137,13 @@ let results = [
   })
 
   (case "stream: the dialect maps Anthropic event names to the normalized set" {
-    let evs = (anthropic events (sse {type: "content_block_delta", index: 3, delta: {type: "text_delta", text: "x"}}))
+    let evs = ((anthropic events (sse {type: "content_block_delta", index: 3, delta: {type: "text_delta", text: "x"}}) {}).events)
     (eq "stream: the dialect maps Anthropic event names to the normalized set" $evs [{type: "text_delta", index: 3, text: "x"}])
   })
 
   (case "stream: the dialect surfaces an unmodelled Anthropic delta as nothing" {
     # rather than inventing an event the state machine would not understand
-    let evs = (anthropic events (sse {type: "content_block_delta", index: 0, delta: {type: "citation_delta"}}))
+    let evs = ((anthropic events (sse {type: "content_block_delta", index: 0, delta: {type: "citation_delta"}}) {}).events)
     (eq "stream: the dialect surfaces an unmodelled Anthropic delta as nothing" $evs [])
   })
 ]

@@ -100,10 +100,7 @@ def role-of [m: record]: nothing -> string {
 
 def placeholder [m: record, idx: int, entry: string, chars: int, kind: string]: nothing -> string {
   let what = (
-    if $kind == "tool_pair" { "tool turn\(call + result\)" }
-    else if $kind == "tool_use" { "assistant message\(with tool call\)" }
-    else if $kind == "tool_result" { "tool result" }
-    else { "message" }
+    if $kind == "tool_pair" { "tool turn\(call + result\)" }     else if $kind == "tool_use" { "assistant message\(with tool call\)" }     else if $kind == "tool_result" { "tool result" }     else { "message" }
   )
   $"[folded] item ($idx) \((role-of $m)) ($what) —— original ($chars) chars, full content in entry ($entry)"
 }
@@ -258,15 +255,11 @@ export def show [
       let m = $r.item
       let c = ($m | get --optional content)
       let kind = (
-        if (has-block $m "tool_use") { "tool_use" }
-        else if (has-block $m "tool_result") { "tool_result" }
-        else if (is-blocks $c) { "blocks" }
-        else { "text" }
+        if (has-block $m "tool_use") { "tool_use" }         else if (has-block $m "tool_result") { "tool_result" }         else if (is-blocks $c) { "blocks" }         else { "text" }
       )
       let size = (char-size $m)
       let preview = (
-        if (is-blocks $c) { $"($c | length) blocks" }
-        else { ($c | into string | str substring 0..( [ 60 ($c | into string | str length) ] | math min )) }
+        if (is-blocks $c) { $"($c | length) blocks" }         else { ($c | into string | str substring 0..( [ 60 ($c | into string | str length) ] | math min )) }
       )
       {
         i: $r.index
@@ -378,9 +371,7 @@ export def apply [
       if ($plan | any {|p| $p == $r.index }) {
         let m = $r.item
         let kind = (
-          if (has-block $m "tool_use") { "tool_pair" }
-          else if (has-block $m "tool_result") { "tool_result" }
-          else { "msg" }
+          if (has-block $m "tool_use") { "tool_pair" }           else if (has-block $m "tool_result") { "tool_result" }           else { "msg" }
         )
         {role: (role-of $m), content: (placeholder $m $r.index $entry (char-size $m) $kind)}
       } else {

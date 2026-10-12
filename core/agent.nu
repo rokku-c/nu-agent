@@ -597,16 +597,12 @@ export def main [
     error make { msg: $"session ($session) already exists. pass --resume to continue it, or pick another id — silently appending to it is the failure this guards against." }
   }
   let prior = (
-    if $resume and ($session | is-empty) { session last }
-    else if $resume { session load $session }
-    else { null }
+    if $resume and ($session | is-empty) { session last }     else if $resume { session load $session }     else { null }
   )
 
   # precedence: explicit flag > stored session > environment/inference
   let p = (
-    if ($provider | is-not-empty) { $provider }
-    else if $prior != null and ((($prior | get --optional provider | default "") | is-not-empty)) { $prior.provider }
-    else { dialect null }
+    if ($provider | is-not-empty) { $provider }     else if $prior != null and ((($prior | get --optional provider | default "") | is-not-empty)) { $prior.provider }     else { dialect null }
   )
   let model = (strip-alias ($model | default (
     if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
@@ -614,9 +610,7 @@ export def main [
   # the system prompt is merged here and NOT inside the skill join below,
   # because that join consumes whatever --system holds
   let system = (
-    if $system != null { $system }
-    else if $prior != null { ($prior | get --optional system) }
-    else { null }
+    if $system != null { $system }     else if $prior != null { ($prior | get --optional system) }     else { null }
   )
 
   # tools come from module names when given — and on resume they are taken from
@@ -625,7 +619,8 @@ export def main [
   let tools_from = (
     if ($tools_from | is-empty) and $prior != null { ($prior | get --optional tools.modules | default []) } else { ($tools_from | default []) }
   )
-  let from_modules = ($tools_from | each {|m| expose from-module $m } | flatten)
+  # concat, not flatten — see the warning above `as-list`
+  let from_modules = ($tools_from | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
   let tools = (normalize-tools ($tools | append $from_modules))
 
   # ── session bookkeeping ──
@@ -649,9 +644,7 @@ export def main [
 
   # skills are stored as PATHS on resume, so an edited SKILL.md is re-read
   let skill = (
-    if ($skill | is-not-empty) { $skill }
-    else if $prior != null { ($prior | get --optional skill | default []) }
-    else { [] }
+    if ($skill | is-not-empty) { $skill }     else if $prior != null { ($prior | get --optional skill | default []) }     else { [] }
   )
 
   # ── explicitly mounted skills ──
@@ -686,9 +679,7 @@ export def main [
 "
   )
   let sys = (
-    if ($skill_text | is-empty) { $system }
-    else if $system == null { $skill_text }
-    else { $"($system)
+    if ($skill_text | is-empty) { $system }     else if $system == null { $skill_text }     else { $"($system)
 
 ---
 

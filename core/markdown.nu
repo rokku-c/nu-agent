@@ -81,9 +81,7 @@ def render-node [n: record, on: bool]: nothing -> string {
     let bar = (esc "4" $on)
     let rule = (wrap ($"─" | fill -w 40) "dark_gray" $on)
     return (
-      if $lvl == 1 { $"($bar)($body)(esc 24 $on)\n($rule)\n" }
-      else if $lvl == 2 { $"($bar)($body)(esc 24 $on)\n" }
-      else { $"($body)\n" }
+      if $lvl == 1 { $"($bar)($body)(esc 24 $on)\n($rule)\n" }       else if $lvl == 2 { $"($bar)($body)(esc 24 $on)\n" }       else { $"($body)\n" }
     )
   }
 

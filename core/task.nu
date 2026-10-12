@@ -103,8 +103,7 @@ export def main [
   # parent's whole frame and spend the child's budget on instructions about a
   # conversation it cannot see.
   let sys = (
-    if $system != null { $system }
-    else {
+    if $system != null { $system }     else {
       "You are a subagent. You have been given one task by another agent and no access to its conversation. Work only from the task text below. Use your tools, then reply with your findings and nothing else — your reply is the entire result the caller receives."
     }
   )

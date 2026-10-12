@@ -54,12 +54,20 @@ export def request [req: record]: nothing -> record {
   {url: $"((url))/v1/messages", headers: (headers (auth)), body: $body}
 }
 
-# one SSE line → zero or more normalized events.
+# one SSE line → zero or more normalized events, plus the (unchanged) state.
+#
+# this wire already speaks content blocks and carries its own index, so there is
+# nothing to remember between lines — hence the state parameter being passed
+# through untouched. see openai.nu for the dialect that needs it.
 #
 # a non-data line is surfaced as a `raw` event rather than dropped: the caller
 # needs it. when a gateway answers an error as plain JSON instead of SSE, those
 # lines are the only evidence of what went wrong.
-export def events [line: string]: nothing -> list {
+export def events [line: string, state: record]: nothing -> record {
+  {events: (parse $line), state: ($state | default {})}
+}
+
+def parse [line: string]: nothing -> list {
   if not ($line | str starts-with "data: ") {
     if ($line | str starts-with "event: ") { return [] }
     if ($line | str trim | is-empty) { return [] }

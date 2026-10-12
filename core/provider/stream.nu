@@ -23,7 +23,15 @@
 # the accumulator. it is threaded through transport.stream's reduce, never held
 # in a mutable variable — an `each` closure cannot capture one.
 export def seed []: nothing -> record {
-  {blocks: [], idx: -1, stop_reason: null, usage: {}, id: null, model: null, other: [], mdstate: {buf: "", in_fence: false}}
+  {
+    blocks: [], idx: -1, stop_reason: null, usage: {}, id: null, model: null
+    other: [], mdstate: {buf: "", in_fence: false}
+    # per-dialect scratch that must survive across SSE lines. it lives here
+    # rather than in the dialect because transport's reduce owns the accumulator,
+    # and a closure cannot hold a mutable variable. anthropic ignores it; openai
+    # keeps its tool_calls index map in it.
+    dialect: {}
+  }
 }
 
 # replace the nth item of the current block outright.
@@ -53,8 +61,9 @@ export def apply-event [
   if $t == "message_start" {
     return {
       blocks: [], idx: -1, other: $a.other
+      dialect: ($a | get --optional dialect | default {})
       mdstate: ($a | get --optional mdstate | default {buf: "", in_fence: false})
-      stop_reason: null
+      stop_reason: ($ev | get --optional stop_reason)
       usage: ($ev | get --optional usage | default {})
       id: ($ev | get --optional id)
       model: ($ev | get --optional model)
@@ -156,18 +165,25 @@ export def apply-event [
 
 # fold one raw SSE line into the accumulator: hand it to the dialect, then apply
 # whatever normalized events come back.
+#
+# `events` is (line, state) -> {events, state}. the state is threaded through so
+# a dialect whose wire format has no content-block concept can keep the map it
+# needs between lines; it rides in the accumulator, which is what survives the
+# reduce. anthropic's dialect ignores it entirely.
 export def step-line [
   line: string
   a: record
-  events: closure      # (line) -> list<record>
+  events: closure      # (line, state) -> {events, state}
   show_thinking: bool
   render: bool
   on: bool
   md_step: closure
   md_flush: closure
 ]: nothing -> record {
-  let evs = (do $events $line)
-  $evs | reduce --fold $a {|ev, acc| (apply-event $ev $acc $show_thinking $render $on $md_step $md_flush) }
+  let res = (do $events $line ($a | get --optional dialect | default {}))
+  let carried = ($a | upsert dialect (($res | get --optional state) | default {}))
+  (($res | get --optional events) | default [])
+  | reduce --fold $carried {|ev, acc| (apply-event $ev $acc $show_thinking $render $on $md_step $md_flush) }
 }
 
 # the accumulator → an Anthropic-shaped message body, so a streamed call and a

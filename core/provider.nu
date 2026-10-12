@@ -10,12 +10,16 @@
 #
 # the consequence is the useful part: `anthropic.nu` is a pass-through whose
 # behaviour can be pinned exactly, and `openai.nu` carries all the translation.
+#
+# a dialect implements: url, auth, model, headers, request, response, events —
+# and (for the two whose message shapes differ) messages and tools.
 
 use ./provider/anthropic.nu
+use ./provider/openai.nu
 use ./provider/stream.nu
 use ./provider/transport.nu
 
-const KNOWN = ["anthropic"]
+const KNOWN = ["anthropic" "openai"]
 
 # which dialect to use: an explicit choice, then the environment, then inference.
 # inference is deliberately conservative — it only speaks up when exactly one
@@ -40,12 +44,12 @@ def check [p: string]: nothing -> nothing {
 
 export def url [p: string]: nothing -> string {
   check $p
-  if $p == "anthropic" { anthropic url }
+  if $p == "anthropic" { anthropic url } else { openai url }
 }
 
 export def auth [p: string]: nothing -> string {
   check $p
-  if $p == "anthropic" { anthropic auth }
+  if $p == "anthropic" { anthropic auth } else { openai auth }
 }
 
 # the model name the dialect would use when the caller names none. the
@@ -54,30 +58,31 @@ export def auth [p: string]: nothing -> string {
 # lives in the agent.
 export def model [p: string]: nothing -> string {
   check $p
-  if $p == "anthropic" { anthropic model }
+  if $p == "anthropic" { anthropic model } else { openai model }
 }
 
 export def headers [p: string, token: string]: nothing -> record {
   check $p
-  if $p == "anthropic" { anthropic headers $token }
+  if $p == "anthropic" { anthropic headers $token } else { openai headers $token }
 }
 
 # canonical request -> the wire request: {url, headers, body}
 export def request [p: string, req: record]: nothing -> record {
   check $p
-  if $p == "anthropic" { anthropic request $req }
+  if $p == "anthropic" { anthropic request $req } else { openai request $req }
 }
 
-# one raw SSE line -> zero or more normalized events (see stream.nu)
-export def events [p: string, line: string]: nothing -> list {
+# one raw SSE line -> {events, state}. the state is the dialect's scratch across
+# lines — see stream.nu for why it exists and openai.nu for who needs it.
+export def events [p: string, line: string, state: record]: nothing -> record {
   check $p
-  if $p == "anthropic" { anthropic events $line }
+  if $p == "anthropic" { anthropic events $line $state } else { openai events $line $state }
 }
 
 # a non-streaming response body -> canonical
 export def response [p: string, body: record]: nothing -> record {
   check $p
-  if $p == "anthropic" { anthropic response $body }
+  if $p == "anthropic" { anthropic response $body } else { openai response $body }
 }
 
 # ── execution ──
@@ -117,7 +122,7 @@ export def send-stream [
 
   let a = (
     transport stream $wire.url $wire.headers $wire.body $timeout (stream seed) {|line, acc|
-      stream step-line $line $acc {|l| events $p $l } $show_thinking $render $on $md_step $md_flush
+      stream step-line $line $acc {|l, st| events $p $l $st } $show_thinking $render $on $md_step $md_flush
     }
   )
 

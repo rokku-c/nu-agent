@@ -36,29 +36,66 @@ inside one person's nushell config directory, named `nu-read`, `nu-bash`,
 
 ## Install
 
-```nushell
-git clone git@github.com:rokku-c/nu-agent.git
-cd nu-agent
+### One command
 
-nu install.nu --check      # pre-flight: shows what it would write, verifies it resolves
-nu install.nu              # writes it
+```bash
+git clone git@github.com:rokku-c/nu-agent.git ~/nu-agent && nu ~/nu-agent/install.nu
 ```
 
-Then reopen nushell. `install.nu` appends **one marker-guarded block** to your
-`config.nu` and nothing else; `--uninstall` removes exactly that block again.
+Then reopen nushell. That is the whole install.
+
+### One command, including the MCP server
+
+```bash
+git clone git@github.com:rokku-c/nu-agent.git ~/nu-agent && nu ~/nu-agent/install.nu --mcp
+```
+
+`--mcp` also registers the server in your MCP client config (default
+`~/.claude.json`). It backs the file up first, leaves every other server and
+every unrelated key alone, and does nothing on a second run. Restart the client
+to pick it up.
+
+### Pre-flight
+
+```bash
+nu ~/nu-agent/install.nu --check
+```
+
+Shows the exact block it would write, the MCP entry, and — the useful part —
+runs it against a **child process**, because that is where a broken install
+fails silently. It writes nothing.
+
+### Uninstall
+
+```bash
+nu ~/nu-agent/install.nu --uninstall --uninstall-mcp
+```
+
+`--uninstall` removes exactly the block it wrote and nothing else; it leaves the
+backup and your other MCP servers alone. Drop `--uninstall-mcp` to keep the MCP
+entry.
+
+If the clone is already gone, the block is delimited and can be removed by hand:
+delete everything between the `nu-agent (begin)` and `nu-agent (end)` markers in
+`config.nu`.
+
+### What it writes
+
+`install.nu` appends **one marker-guarded block** to your `config.nu` — a
+`NU_AGENT_ROOT` line and one `use` line per module, all absolute paths. Nothing
+else is touched, no environment variable is needed, and re-running replaces the
+block in place instead of stacking another one.
 
 ### MCP
 
-`install.nu` prints the entry to paste into your MCP client:
+Tools appear as `mcp__agent__read`, `mcp__agent__bash`,
+`mcp__agent__nu-shell`, and so on. If you would rather wire it up by hand:
 
 ```json
 {"mcpServers":{"agent":{"type":"stdio","command":"nu",
   "args":["--config","/path/to/config.nu","/path/to/nu-agent/core/mcp-server.nu"],
   "env":{"NU_MCP_MODULES":"*"}}}}
 ```
-
-Tools then appear as `mcp__agent__read`, `mcp__agent__bash`,
-`mcp__agent__nu-shell`, and so on.
 
 ---
 
@@ -133,7 +170,7 @@ core/     the runtime — not offered to the model
   mcp.nu          MCP client
   mcp-server.nu   MCP server
   provider.nu     dialect dispatch + execution
-  provider/       anthropic · stream (the SSE machine) · transport
+  provider/       anthropic · openai · stream (the SSE machine) · transport
   trace.nu        a run → a browsable HTML page
   layout.nu       where the checkout is, at runtime
   quote.nu        POSIX quoting
@@ -179,6 +216,26 @@ for the model has to fit in `msg`.
 `read`, `write`, `calc`, `bash`, `host`, `remote`, `image`, `peers`, `toon`,
 `style`, `trace`, `context`, `agent`, `policy`, `task` are all free.
 
+**`flatten` recurses into records, and whether it does depends on the input.**
+Measured: `[tool] | flatten` hoists a nested `input_schema` and destroys it,
+while `[[tool] [tool]] | flatten` leaves it alone — so the same expression is
+safe with two elements and silently wrong with one. In the OpenAI dialect that
+turned a single `tool_calls` entry from an array into a bare object, which every
+endpoint rejects, and it only happened when the model made exactly one tool call.
+Use an explicit one-level concat instead.
+
+**A newline before `else` parses as a command named `else`.** `if … { }` then
+`else` on the next line is fine at the top level of a `( )` grouping and fails
+inside a closure. The failure surfaces as "Eval block failed with pipeline
+input" wrapping "External command failed", pointing at the call site rather than
+the line — so it reads like the caller is broken.
+
+**A literal list of differently-shaped records does not type.** `[{type:
+"tool_result", …} {type: "text", …}]` fails where the literal is written, with
+the same unhelpful wrapper. The runtime never builds one (it appends, or parses
+JSON), but a test that writes one by hand will fail for reasons that have nothing
+to do with the code under test.
+
 **Stdout is data.** In the MCP server one stray character breaks every client;
 `--stream` prints model text there; and the test harness had to stop reporting
 its results on stdout because the `--stream` case polluted it.
@@ -196,6 +253,7 @@ nu test/run.nu unit mcp     # or just some suites
 |---|---|
 | `unit` | pure functions — schema generation, folding, markdown, TOON, calc, colour |
 | `resolve` | module resolution **in a child process**, stem uniqueness, the naming contract |
+| `openai` | the OpenAI dialect's translation, plus the streaming state it needs |
 | `stream` | the SSE state machine, replayed from canned bytes — thinking, tool fragments, no-SSE errors |
 | `policy` | the permission gate: matching, refusal wording, deferral, and enforcement through the tool executor |
 | `session` | persistence and resume, including the invariant that a folded run stores its unfolded history |
@@ -236,10 +294,10 @@ The remote is `git@github.com:rokku-c/nu-agent.git`, over SSH.
 
 The runtime is whole; what is missing is the machinery around it. In order:
 
-1. **provider** — stop hardcoding Anthropic. Anthropic's content-block shape
-   stays the internal canonical form (the loop, context, trace and MCP already
-   speak it), so `anthropic.nu` is a pass-through and all the translation lives
-   in `openai.nu`.
+1. ~~**provider**~~ — done, see `core/provider/`. Anthropic stayed the internal
+   canonical shape, so `anthropic.nu` is a pass-through and `openai.nu` carries
+   the translation — including the one piece of stream state the two wires
+   differ on.
 2. ~~**policy**~~ — done, see `core/policy.nu`.
 3. ~~**session**~~ — done, see `core/session.nu`. The invariant held: the loop
    carries an append-only `canonical` list that folding never touches, and that
@@ -251,6 +309,24 @@ The runtime is whole; what is missing is the machinery around it. In order:
    policy but never widen them, and it is handed the parent's *compiled* rules
    rather than a path, so it cannot escape by pointing `NU_POLICY_FILE` somewhere
    empty.
+
+## Providers
+
+```nushell
+agent chat "hi" --provider openai        # or anthropic, the default
+$env.NU_AGENT_PROVIDER = "openai"        # or set it for the session
+```
+
+| | Anthropic | OpenAI-compatible |
+|---|---|---|
+| base URL | `ANTHROPIC_BASE_URL` | `OPENAI_BASE_URL` (includes `/v1`, as every SDK treats it) |
+| token | `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` | `OPENAI_API_KEY` |
+| model | `ANTHROPIC_MODEL` | `OPENAI_MODEL` |
+
+With no explicit choice, the dialect is inferred — but only when exactly one of
+the two has credentials, rather than guessed from a model name.
+
+Both are exercised end-to-end in the `e2e` suite.
 
 ## License
 

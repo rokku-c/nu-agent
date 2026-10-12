@@ -18,6 +18,17 @@ if not (needs-creds) {
   return
 }
 
+# the OpenAI cases need an endpoint, not just a key. a key alone is not enough
+# to assume api.openai.com is the right place to send it: this machine has an
+# OPENAI_API_KEY in its environment that is not usable there, and a suite that
+# goes red because of ambient credentials is a suite nobody trusts. pointing
+# OPENAI_BASE_URL at something is the caller saying "this one is real".
+def openai-ready []: nothing -> bool {
+  let key = ($env.OPENAI_API_KEY? | default "")
+  let url = ($env.OPENAI_BASE_URL? | default "")
+  (not ($key | is-empty)) and (not ($url | is-empty))
+}
+
 let root = ($env.NU_AGENT_ROOT? | default "")
 let tmp_html = ($nu.temp-dir | path join $"nu-agent-e2e-(random int 100000..999999).html")
 
@@ -94,6 +105,41 @@ let results = [
     rm -f $p
     let injected = (not ($raw | str contains "/*__TRACE_DATA__*/"))
     (is-true "e2e: a real run renders to a self-contained HTML trace" ($injected and ($raw | str length) > 5000))
+  })
+
+  # ── the second dialect, end to end ──
+  # the two wires differ enough that a translation bug only shows in motion:
+  # tool_calls is an array here and a content block there, arguments are a JSON
+  # string here and an object there, and the streaming state has no counterpart
+  # on the other side at all.
+  (case "e2e: the OpenAI dialect answers a plain turn" {
+    if not (openai-ready) {
+      skip "e2e: the OpenAI dialect answers a plain turn" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+    } else {
+      let out = (agent chat "reply with exactly: OK" --provider openai --max-tokens 64)
+      (is-true "e2e: the OpenAI dialect answers a plain turn" (($out | str length) > 0))
+    }
+  })
+
+  (case "e2e: the OpenAI dialect runs the whole tool loop" {
+    # the case that caught the flatten bug: a single tool call became an object
+    # where the wire wants an array, and only round two exposed it
+    if not (openai-ready) {
+      skip "e2e: the OpenAI dialect runs the whole tool loop" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+    } else {
+      let r = (agent "What is (1234 * 5678) + 99? You must use the calc tool." --tools-from [calc] --provider openai --max-tokens 512 --json)
+      let digits = (($r.text | default "") | str replace -r -a "[^0-9]" "")
+      (is-true "e2e: the OpenAI dialect runs the whole tool loop" (($r.rounds >= 2) and ($r.tool_calls >= 1) and ($digits | str contains "7006751")))
+    }
+  })
+
+  (case "e2e: the OpenAI dialect streams" {
+    if not (openai-ready) {
+      skip "e2e: the OpenAI dialect streams" "set OPENAI_API_KEY and OPENAI_BASE_URL"
+    } else {
+      let r = (^nu --config $nu.config-path -c 'agent chat "count to three" --provider openai --stream --max-tokens 128' | complete)
+      (is-true "e2e: the OpenAI dialect streams" (($r.exit_code == 0) and (($r.stdout | str trim | str length) > 0)))
+    }
   })
 
   # ── context folding, driven by real token counts ──
