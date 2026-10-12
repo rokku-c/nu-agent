@@ -371,7 +371,7 @@ def normalize-tools [raw: any]: nothing -> list {
 export def tui [
   --session (-S): string          # start or continue this session
   --resume                        # continue the newest session
-  --tools-from: list<string> = ["read" "calc" "nu-shell"]
+  --tools-from: list<string> = ["read" "write" "edit" "shell"]
   --model (-m): string
   --provider (-p): string
   --system (-s): string
@@ -912,6 +912,11 @@ export def main [
   mut rounds = 0
   mut tool_calls = 0
   mut last_tokens = 0
+  mut last_out = 0
+  # running totals for the session, so a caller can show "how much has this
+  # conversation cost" without re-deriving it from the transcript
+  mut total_in = ($prior | get --optional counters.total_input | default 0)
+  mut total_out = ($prior | get --optional counters.total_output | default 0)
   # estimated size of the next request. last_tokens alone isn't enough -- that's the real
   # value "before the tool results were added", and one big output can blow up the next
   # round outright. so account for it once the results are appended.
@@ -940,6 +945,9 @@ export def main [
       }
     }
 
+    # the gap between rounds, for the non-verbose stream. the verbose header's
+    # template starts with a newline of its own, so it does not need this.
+    if $stream and ($rounds > 0) and $streamed and (not $verbose) { print "" }
     if $verbose { vprint $"
 **Round ($rounds + 1)**
 " }
@@ -984,6 +992,9 @@ export def main [
     $est_next = $last_tokens
     $stop_reason = ($body | get --optional stop_reason | default "unknown")
 
+    $last_out = ($body | get --optional usage.output_tokens | default 0)
+    $total_in = $total_in + $last_tokens
+    $total_out = $total_out + $last_out
     let blocks = ($body | get --optional content | default [])
     let calls = ($blocks | where type == "tool_use")
     let reply = (text-of $body)
@@ -993,11 +1004,13 @@ export def main [
     $rounds = $rounds + 1
 
     if $verbose and ($last_tokens > 0) {
-      vprint $"- context: ($last_tokens) tokens"
+      vprint $"- context: ($last_tokens) in · ($last_out) out"
     }
-    # wrap up this round's text when streaming, so the next round's progress doesn't stick to the same line
+    # note the round printed something. the blank line that separates rounds is
+    # emitted BEFORE the next one (see the top of the loop), not after this one:
+    # a trailing blank is the caller's to add, and the interactive prompt already
+    # adds one — two in a row reads as a mistake.
     if $stream and (($reply | str trim) | is-not-empty) {
-      print ""
       $streamed = true
     }
 
@@ -1076,7 +1089,9 @@ export def main [
         max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
       } --counters {
         rounds: $rounds, tool_calls: $tool_calls
-        last_input_tokens: $last_tokens, stop_reason: $stop_reason
+        last_input_tokens: $last_tokens, last_output_tokens: $last_out
+        total_input: $total_in, total_output: $total_out
+        stop_reason: $stop_reason
       } --folds $folds --context-entries $entries --parent $parent --depth $depth) | session store | ignore
     }
   }
@@ -1109,7 +1124,9 @@ export def main [
       max_tokens: $max_tokens, max_output: $max_output, max_rounds: $max_rounds
     } --counters {
       rounds: $rounds, tool_calls: $tool_calls
-      last_input_tokens: $last_tokens, stop_reason: $stop_reason
+      last_input_tokens: $last_tokens, last_output_tokens: $last_out
+      total_input: $total_in, total_output: $total_out
+      stop_reason: $stop_reason
     } --folds $folds --context-entries $entries --parent $parent --depth $depth | session store)
   }
 

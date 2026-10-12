@@ -38,7 +38,7 @@ const BEGIN = "# ── nu-agent (begin) ── written by install.nu; edits ins
 const END = "# ── nu-agent (end) ──"
 
 # capability modules first (they become the MCP tools), then the runtime
-const TOOL_MODULES = ["bash" "calc" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "toon" "write"]
+const TOOL_MODULES = ["edit" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "shell" "toon" "write"]
 # task is a capability (the model calls it), but it is not in tools/ — it is a
 # wrapper around the loop, and belongs beside it
 const CORE_MODULES = ["agent" "context" "expose" "handoff" "interactive" "markdown" "mcp" "policy" "session" "style" "task" "trace"]

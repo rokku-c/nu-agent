@@ -8,7 +8,7 @@
 #   agent tui                       # start a new conversation
 #   agent tui --resume              # continue the newest one
 #   agent tui --session my-work     # continue a named one
-#   agent tui --tools-from [read bash nu-shell]
+#   agent tui --tools-from [read shell nu-shell]
 #
 # ── what this is, precisely ──
 # a line-based interactive session, not a full-screen one. the input line is read
@@ -45,6 +45,32 @@ def history-path []: nothing -> path {
   $d | path join $HISTORY_FILE
 }
 
+# token counts read badly as six digits; k is enough resolution to see a
+# conversation growing, which is the only thing this is for
+def fmt-tokens [n: any]: nothing -> string {
+  let v = ($n | default 0 | into int)
+  if $v >= 1000000 { $"($v / 1000000 | math round --precision 1)M"
+  } else if $v >= 1000 { $"($v / 1000 | math round --precision 1)k"
+  } else { $v | into string }
+}
+
+# what the conversation has cost so far, and what the last request cost.
+#
+# two numbers because they answer different questions: the last request is what
+# the context costs right now (and what folding will act on), the session total
+# is what the whole conversation has spent.
+def status-line [sid: string]: nothing -> string {
+  if not (session exists $sid) { return "" }
+  let c = ((session load $sid) | get --optional counters | default {})
+  let li = ($c | get --optional last_input_tokens | default 0)
+  let lo = ($c | get --optional last_output_tokens | default 0)
+  let ti = ($c | get --optional total_input | default 0)
+  let to = ($c | get --optional total_output | default 0)
+  let turns = ($c | get --optional rounds | default 0)
+  let label = (if $turns == 1 { "round" } else { "rounds" })
+  $"  · last request (fmt-tokens $li) in / (fmt-tokens $lo) out · session (fmt-tokens $ti) in / (fmt-tokens $to) out · ($turns) ($label)"
+}
+
 const HELP = [
   "commands:"
   "  /help              this"
@@ -54,6 +80,8 @@ const HELP = [
   "  /tools [a,b,c]     show or set which capability modules are offered"
   "  /model [name]      show or set the model"
   "  /system [text]     show or set the system prompt"
+  "  /rewind            drop the last turn, so you can ask it again"
+  "  /status            context and token totals for this session"
   "  /verbose           toggle showing tool calls and their results"
   "  /thinking          toggle streaming the model's reasoning"
   "  /history [n]       the last n turns of this session"
@@ -90,7 +118,7 @@ export def repl [
   --send: closure                 # {line, session, resume, tools, model, provider, system, max_tokens} -> nothing
   --session (-S): string
   --resume
-  --tools-from: list<string> = ["read" "calc" "nu-shell"]
+  --tools-from: list<string> = ["read" "write" "edit" "shell"]
   --model (-m): string
   --provider (-p): string
   --system (-s): string
@@ -182,7 +210,7 @@ export def repl [
       } else if $cmd == "/tools" {
         if ($rest | is-empty) {
           print $"tools: ($tools | str join ', ')"
-          print "  (set with /tools read,bash)"
+          print "  (set with /tools read,shell)"
         } else {
           $tools = ($rest | split row "," | each {|t| $t | str trim } | where {|t| $t | is-not-empty })
           print $"tools: ($tools | str join ', ')"
@@ -196,6 +224,27 @@ export def repl [
           $sys = $rest
           print $"system: ($sys)"
         }
+      } else if ($cmd in ["/rewind"]) {
+        # the functional part of a rewind. double-ESC cannot be done here: the
+        # input line is read by reedline, which consumes escape sequences itself,
+        # so this loop never sees a key — see the note at the top of the file.
+        if not (session exists $sid) {
+          print -e "nothing to rewind yet"
+        } else {
+          let rec = (session load $sid)
+          let msgs = ($rec | get --optional messages | default [])
+          let last_user = ($msgs | enumerate | where {|r| ($r.item | get --optional role) == "user" } | last | get --optional index)
+          if $last_user == null {
+            print -e "nothing to rewind"
+          } else {
+            $rec | upsert messages ($msgs | first $last_user) | session store | ignore
+            print $"dropped (($msgs | length) - $last_user) message\(s\), back to before your last turn"
+            print "  ask again and it continues from there"
+          }
+        }
+      } else if $cmd == "/status" {
+        let line = (status-line $sid)
+        if ($line | is-empty) { print -e "nothing stored yet" } else { print $line }
       } else if ($cmd in ["/verbose" "/v"]) {
         $verbose = (if ($rest | is-empty) { not $verbose } else { $rest in ["on" "true" "1"] })
         print $"verbose: (if $verbose { 'on — tool calls and results' } else { 'off' })"
@@ -232,13 +281,20 @@ export def repl [
       # after the first turn the session exists, so it is resumed from then on
       $resuming = true
       $turn = $turn + 1
+      # what the turn cost. printed here rather than by the loop so it appears
+      # once per turn rather than once per round.
+      let st = (status-line $sid)
+      if ($st | is-not-empty) { print $st }
       if $no_save { print -e "(not saved: --no-save)" }
     } catch {|e|
       # a failed turn must not take the session down with it — the transcript so
       # far is already on disk, and the next line continues from it
       print -e $"turn failed: ($e.msg)"
     }
-    print ""
+    # NO blank line here. the loop already emits one after every round that
+    # produced text, which for a finished turn is the last one — so a separator
+    # here made two, every time. the loop's is the right one: it exists to keep a
+    # following round from sticking to the text, and it fires once per turn.
   }
 
   print $"session ($sid)"

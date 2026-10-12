@@ -13,7 +13,7 @@ $env.NU_POLICY_FILE = ($tmp | path join "rules.json")
 
 # a rules file exercising all three match keys, first-match-wins, and a custom default
 {version: 1, default: "allow", rules: [
-  {match: {tool: "bash", command: "*rm -rf*"}, action: "deny", reason: "no recursive deletes"}
+  {match: {tool: "shell", command: "*rm -rf*"}, action: "deny", reason: "no recursive deletes"}
   {match: {tool: "read", path: "*id_rsa*"}, action: "deny", reason: "private keys"}
   {match: {tool: "write", path: "/etc/*"}, action: "ask", reason: "system config"}
   {match: {tool: "calc"}, action: "allow"}
@@ -24,26 +24,26 @@ let results = [
   (case "policy: with no rules file the gate is open" {
     let saved = $env.NU_POLICY_FILE
     $env.NU_POLICY_FILE = ($tmp | path join "does-not-exist.json")
-    let d = (policy check {tool: "bash", command: "ls", input: {}})
+    let d = (policy check {tool: "shell", command: "ls", input: {}})
     let src = $d.source
     $env.NU_POLICY_FILE = $saved
     (eq "policy: with no rules file the gate is open" [$d.decision $src] ["allow" "none"])
   })
 
   (case "policy: the default is allow, so an unlisted call runs" {
-    let d = (policy check {tool: "bash", command: "ls -la", input: {}})
+    let d = (policy check {tool: "shell", command: "ls -la", input: {}})
     (eq "policy: the default is allow, so an unlisted call runs" $d.decision "allow")
   })
 
   # ── matching ──
   (case "policy: a command glob matches the assembled command line" {
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     (eq "policy: a command glob matches the assembled command line" $d.decision "deny")
   })
 
   (case "policy: a glob does not match a near-miss" {
     # the pattern is `*rm -rf*`, so a plain `rm` must not trip it
-    let d = (policy check {tool: "bash", command: "bash \"rm /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm /tmp/x\"", input: {}})
     (eq "policy: a glob does not match a near-miss" $d.decision "allow")
   })
 
@@ -65,7 +65,7 @@ let results = [
   (case "policy: a tool and command together must BOTH match" {
     # rule 1 is tool=read + path=*id_rsa*. a bash call carrying that path must
     # not trip it — an AND across keys, not an OR
-    let d = (policy check {tool: "bash", command: "cat /home/u/.ssh/id_rsa", input: {path: "/home/u/.ssh/id_rsa"}})
+    let d = (policy check {tool: "shell", command: "cat /home/u/.ssh/id_rsa", input: {path: "/home/u/.ssh/id_rsa"}})
     (eq "policy: a tool and command together must BOTH match" $d.decision "allow")
   })
 
@@ -76,7 +76,7 @@ let results = [
   })
 
   (case "policy: the first matching rule wins" {
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     (eq "policy: the first matching rule wins" $d.rule 0)
   })
 
@@ -86,20 +86,20 @@ let results = [
   })
 
   (case "policy: an undecided call reports no rule" {
-    let d = (policy check {tool: "bash", command: "ls", input: {}})
+    let d = (policy check {tool: "shell", command: "ls", input: {}})
     (eq "policy: an undecided call reports no rule" $d.rule null)
   })
 
   (case "policy: check does not raise on a denial — deciding and enforcing are separate" {
     # the caller decides what to do; a gate that threw while merely being asked
     # could not be used to explain a rules file
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /\"", input: {}})
     (eq "policy: check does not raise on a denial — deciding and enforcing are separate" $d.decision "deny")
   })
 
   # ── the message the model reads ──
   (case "policy: the refusal names the command, the rule and the reason" {
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     let m = (policy refuse-message $d)
     (is-true "policy: the refusal names the command, the rule and the reason" (
       ($m | str contains "rm -rf /tmp/x") and ($m | str contains "rule 0") and ($m | str contains "no recursive deletes")
@@ -108,12 +108,12 @@ let results = [
 
   (case "policy: the refusal tells the model not to retry" {
     # without this the model will simply re-issue the call
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     (has "policy: the refusal tells the model not to retry" (policy refuse-message $d) "do not retry")
   })
 
   (case "policy: the refusal points the model at the user, not at a workaround" {
-    let d = (policy check {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let d = (policy check {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     (has "policy: the refusal points the model at the user, not at a workaround" (policy refuse-message $d) "amend the policy")
   })
 
@@ -126,12 +126,12 @@ let results = [
   (case "policy: a denied call returns an is_error tool result, not an exception" {
     # this is the contract: the loop must be able to hand the denial back to the
     # model, so invoke-tool has to return rather than tear the run down
-    let r = (agent invoke-tool {name: "bash", input: {command: "rm -rf /tmp/nope"}, id: "t2"} null 8000 60sec false)
+    let r = (agent invoke-tool {name: "shell", input: {command: "rm -rf /tmp/nope"}, id: "t2"} null 8000 60sec false)
     (is-true "policy: a denied call returns an is_error tool result, not an exception" ($r.is_error == true))
   })
 
   (case "policy: the tool result carries the refusal text for the model" {
-    let r = (agent invoke-tool {name: "bash", input: {command: "rm -rf /tmp/nope"}, id: "t3"} null 8000 60sec false)
+    let r = (agent invoke-tool {name: "shell", input: {command: "rm -rf /tmp/nope"}, id: "t3"} null 8000 60sec false)
     (has "policy: the tool result carries the refusal text for the model" $r.content "do not retry")
   })
 
@@ -139,7 +139,7 @@ let results = [
     # the proof that it was blocked rather than merely reported: a command that
     # would leave a file behind leaves no file
     let canary = ($tmp | path join "canary")
-    let r = (agent invoke-tool {name: "bash", input: {command: $"touch ($canary); rm -rf /tmp/whatever"}, id: "t4"} null 8000 60sec false)
+    let r = (agent invoke-tool {name: "shell", input: {command: $"touch ($canary); rm -rf /tmp/whatever"}, id: "t4"} null 8000 60sec false)
     (is-true "policy: a denied call does not execute" (not ($canary | path exists)))
   })
 
@@ -212,13 +212,13 @@ let results = [
     # NU_POLICY_FILE at an empty file cannot widen what it may do
     let saved = ($env.NU_AGENT_POLICY? | default "")
     $env.NU_AGENT_POLICY = ({version: 1, default: "deny", rules: []} | to json -r)
-    let d = (policy check {tool: "bash", command: "ls", input: {}})
+    let d = (policy check {tool: "shell", command: "ls", input: {}})
     $env.NU_AGENT_POLICY = $saved
     (eq "policy: injected compiled rules beat the rules file" $d.decision "deny")
   })
 
   (case "policy: explain reports what matched, for writing a rules file" {
-    let e = (policy explain {tool: "bash", command: "bash \"rm -rf /tmp/x\"", input: {}})
+    let e = (policy explain {tool: "shell", command: "bash \"rm -rf /tmp/x\"", input: {}})
     (is-true "policy: explain reports what matched, for writing a rules file" ($e.matched | str contains "rule 0"))
   })
 
@@ -227,7 +227,7 @@ let results = [
     {rules: []} | save -f $bad
     let saved = ($env.NU_POLICY_FILE? | default "")
     $env.NU_POLICY_FILE = $bad
-    let outcome = (try { policy check {tool: "bash", command: "ls", input: {}}; "no error" } catch {|e| $e.msg })
+    let outcome = (try { policy check {tool: "shell", command: "ls", input: {}}; "no error" } catch {|e| $e.msg })
     $env.NU_POLICY_FILE = $saved
     (has "policy: a malformed rules file says what is missing" $outcome "missing required field")
   })

@@ -7,8 +7,8 @@
 #   nu-shell "open data.json | jsonschema infer" --json
 #   nu-shell "uname -a" --host prod
 #
-# division of labour with bash:
-#   bash  → runs shell commands (bash)
+# division of labour with shell:
+#   shell → runs shell commands
 #   nu-shell → runs nu code, so every registered module is usable directly
 #              (calc / read / write / host / jsonschema …)
 #

@@ -7,7 +7,7 @@
 #   peers sessions --per-dir 2
 #
 # why a separate module: `agent` spawns a child process for each tool call with no
-# permission confirmation. handing bash to a child agent hands over the whole machine.
+# permission confirmation. handing shell to a child agent hands over the whole machine.
 # this module only enumerates processes and extracts read-only fields, and **accepts no arbitrary command string**, so it is safe to lend out.
 #
 # ── why the exported commands return JSON strings instead of tables ──

@@ -38,7 +38,7 @@ let results = [
     # the parent's restriction decorative
     let saved = ($env.NU_AGENT_TOOLS? | default "")
     $env.NU_AGENT_TOOLS = "read,calc"
-    let m = (try { task "anything" --tools [bash write]; "" } catch {|e| $e.msg })
+    let m = (try { task "anything" --tools [shell write]; "" } catch {|e| $e.msg })
     $env.NU_AGENT_TOOLS = $saved
     (has "task: a subagent may not be given a tool the parent does not have" $m "never widen")
   })

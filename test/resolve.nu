@@ -17,7 +17,7 @@ use ./harness.nu *
 let ROOT = ($env.NU_AGENT_ROOT? | default "")
 
 # the capability modules — keep in sync with install.nu and mcp-server.nu
-const TOOL_MODULES = ["bash" "calc" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "toon" "write"]
+const TOOL_MODULES = ["edit" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "shell" "toon" "write"]
 # nu builtins that a module name must not collide with
 const TAKEN_NAMES = ["http" "reduce" "schema"]
 

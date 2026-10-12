@@ -1,12 +1,17 @@
-# bash.nu — run shell commands (local or remote)
+# shell.nu — run shell commands (local or remote)
 #
-#   use bash.nu
-#   bash "ls -la"
-#   bash "make test" --cwd ~/proj
-#   bash "cat" --stdin "content to feed in"
-#   bash "exit 3" --json            # get {exit_code, stdout, stderr}
-#   bash "uname -a" --host prod     # remote (register first with host)
-#   bash "make test" --timeout 5min # local timeout, killed at the deadline
+# named `shell`, not `bash`: what the agent is asking for is "run a shell
+# command", and `bash` names the implementation. the pair is now `shell` (a
+# POSIX-ish shell) and `nu-shell` (nushell), which is what a model has to choose
+# between. the implementation is still /bin/bash -c, and says so below.
+#
+#   use shell.nu
+#   shell "ls -la"
+#   shell "make test" --cwd ~/proj
+#   shell "cat" --stdin "content to feed in"
+#   shell "exit 3" --json            # get {exit_code, stdout, stderr}
+#   shell "uname -a" --host prod     # remote (register first with host)
+#   shell "make test" --timeout 5min # local timeout, killed at the deadline
 #
 # local runs go through /bin/bash (macOS ships 3.2.57 — no associative arrays, no
 # ** recursive globbing; for a newer one install bash 5 yourself and fix PATH).
@@ -88,7 +93,7 @@ export def main [
   }
 
   if $r.exit_code != 0 {
-    let label = (if $host == null { "bash" } else { $"bash @ ($host)" })
+    let label = (if $host == null { "shell" } else { $"shell @ ($host)" })
     let extra = (if ($out | is-empty) { "" } else { $"\nstdout:\n($out)" })
     error make { msg: (clamp $"($label) exit code ($r.exit_code)\nstderr:\n($err)($extra)" $max_output) }
   }

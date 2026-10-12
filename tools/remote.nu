@@ -6,7 +6,7 @@
 #   remote prod "use read.nu *; read /etc/hosts --limit 3"
 #   remote prod "ls | length" --json
 #
-# this is the explicit "full capability" channel: the basic tools (read/write/bash)
+# this is the explicit "full capability" channel: the basic tools (read/write/shell)
 # go pure POSIX, so any machine you can ssh to works; use this to run nu pipelines remotely,
 # at the cost of installing nushell there. Pair with `host sync` to push local modules over.
 #

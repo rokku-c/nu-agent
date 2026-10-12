@@ -31,9 +31,10 @@ let results = [
   })
 
   (case "mcp: tools/list returns the default capability set" {
-    # NU_MCP_MODULES unset -> DEFAULT_MODULES = nu-shell read write bash calc host
-    let t = (mcp tools (server-argv))
-    (is-true "mcp: tools/list returns the default capability set" (($t | length) >= 15))
+    # NU_MCP_MODULES unset -> DEFAULT_MODULES = read write edit shell: the four a
+    # coding agent reaches for, and nothing else
+    let names = (mcp tools (server-argv) | get name | sort)
+    (eq "mcp: tools/list returns the default capability set" $names ["edit" "read" "shell" "write"])
   })
 
   (case "mcp: 'nu-shell' is the only nu- prefixed tool offered" {
@@ -50,19 +51,19 @@ let results = [
   (case "mcp: an MCP tool uses camelCase inputSchema on the wire, input_schema here" {
     # the client translates between the two; the only format difference between
     # the Anthropic and MCP tool shapes
-    let t = (mcp tools (server-argv) | where name == "calc" | first)
+    let t = (mcp tools (server-argv) | where name == "read" | first)
     (is-true "mcp: an MCP tool uses camelCase inputSchema on the wire, input_schema here" ($t.input_schema != null))
   })
 
   (case "mcp: tools/call actually executes a capability" {
-    let r = (mcp call (server-argv) "calc" {expr: "(6*7)"})
+    let r = (mcp call (server-argv) "shell" {command: "echo $((6*7))"})
     (eq "mcp: tools/call actually executes a capability" ($r.text | str trim) "42")
   })
 
   (case "mcp: a failing tool comes back as is_error, not as a crash" {
     # the loop needs a tool failure to be a result it can hand back to the model,
     # otherwise one bad call takes the whole run down
-    let r = (mcp call (server-argv) "calc" {expr: "not arithmetic at all; rm -rf /"})
+    let r = (mcp call (server-argv) "shell" {command: "exit 3"})
     (is-true "mcp: a failing tool comes back as is_error, not as a crash" ($r.is_error and ($r.text | str length) > 0))
   })
 

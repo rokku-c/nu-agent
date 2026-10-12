@@ -115,8 +115,9 @@ let results = [
   })
 
   (case "openai: every tool survives the translation" {
+    # three modules, one tool each — `write` used to contribute three
     let t = (openai tools ([calc read write] | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x }))
-    (eq "openai: every tool survives the translation" ($t | length) 5)
+    (eq "openai: every tool survives the translation" ($t | length) 3)
   })
 
   # ── request ──

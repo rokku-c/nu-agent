@@ -34,7 +34,7 @@ if ($env.ANTHROPIC_AUTH_TOKEN? | is-empty) {
 }
 
 # ── capabilities: these are what the MCP allowlist exposes ──
-use ../tools/bash.nu
+use ../tools/shell.nu
 use ../tools/calc.nu
 use ../tools/host.nu
 use ../tools/image.nu
@@ -44,7 +44,12 @@ use ../tools/peers.nu
 use ../tools/read.nu
 use ../tools/remote.nu
 use ../tools/toon.nu
+use ../tools/edit.nu
 use ../tools/write.nu
+
+# ── apps: composed capability sets, not installed by install.nu ──
+use ../apps/financial/series.nu
+use ../apps/financial/macro.nu
 
 # ── runtime: loaded, but only what the allowlist names becomes a tool ──
 use ../core/agent.nu
@@ -55,6 +60,8 @@ use ../core/mcp.nu
 # policy is runtime machinery (agent.nu imports it privately), but the tests
 # exercise its rule matching directly rather than only through a live run
 use ../core/policy.nu
+use ../core/handoff.nu
+use ../core/interactive.nu
 use ../core/session.nu
 use ../core/task.nu
 use ../core/style.nu

@@ -2,7 +2,7 @@
 #
 #   use policy.nu
 #
-#   let p = (policy check {tool: "bash", command: "rm -rf /", input: {}})
+#   let p = (policy check {tool: "shell", command: "rm -rf /", input: {}})
 #   $p.decision          # allow | deny | ask
 #   policy explain {...} # why, for writing a rules file
 #   policy test          # dry-run every rule against samples
@@ -106,7 +106,7 @@ def paths-of [input: record]: nothing -> list<string> {
 # the gate. takes a call record, returns a decision record.
 #
 # input:  {tool, command, input}
-#   tool    the name as the model sees it ("bash", "nu-shell", "mcp__x__y")
+#   tool    the name as the model sees it ("shell", "nu-shell", "mcp__x__y")
 #   command the assembled command line, when there is one
 #   input   the tool's arguments, for path patterns
 export def check [call: record]: nothing -> record {
@@ -252,8 +252,8 @@ export def test [--file: path]: nothing -> table {
   let samples = (
     if $file == null {
       [
-        {tool: "bash", command: "ls -la", input: {}}
-        {tool: "bash", command: "rm -rf /tmp/x", input: {}}
+        {tool: "shell", command: "ls -la", input: {}}
+        {tool: "shell", command: "rm -rf /tmp/x", input: {}}
         {tool: "read", command: "", input: {path: "/etc/hosts"}}
         {tool: "write", command: "", input: {path: "/etc/nginx/nginx.conf"}}
         {tool: "read", command: "", input: {path: "/home/u/.ssh/id_rsa"}}

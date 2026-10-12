@@ -163,7 +163,7 @@ export def from-commands [
 
 # given a module name (which must already be `use`d), convert every exported command in it to a tools array
 export def from-module [
-  module: string        # module name, e.g. "bash"
+  module: string        # module name, e.g. "shell"
   --snake
   --prefix: string
 ]: nothing -> list {

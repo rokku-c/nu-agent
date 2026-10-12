@@ -10,7 +10,7 @@
 #   host exec prod "uname -a"
 #   host sync prod
 #
-# read / write / bash reuse this layer too (each adds --host).
+# read / write / shell reuse this layer too (each adds --host).
 #
 # ── security model: the registry is the allowlist ──
 # only names registered via `host add` can be used as a host; anything

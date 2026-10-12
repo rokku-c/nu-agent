@@ -22,7 +22,7 @@ tools. Nushell is the host; the agent never has to know.
 > **The agent sees capabilities, not the host. The only thing that says `nu` is
 > the tool that hands it nushell.**
 
-That is why the tools are named `read`, `write`, `bash`, `calc`, `host` — and
+That is why the tools are named `read`, `write`, `edit`, `shell` — and
 why exactly one is named `nu-shell`. A model that is writing nushell code needs
 to know the language it is writing; it does not need to know that `read` was
 implemented in nushell. Every other `nu-` prefix was leaking the host into the
@@ -88,7 +88,7 @@ block in place instead of stacking another one.
 
 ### MCP
 
-Tools appear as `mcp__agent__read`, `mcp__agent__bash`,
+Tools appear as `mcp__agent__read`, `mcp__agent__shell`,
 `mcp__agent__nu-shell`, and so on. If you would rather wire it up by hand:
 
 ```json
@@ -118,7 +118,7 @@ agent "…" --tools $tools --verbose --show-thinking
 
 # give it eyes, and a working directory's worth of tools
 agent chat "what is in this diagram?" --image diagram.png
-agent "add a --verbose flag to src/main.rs" --tools (expose from-module [read write bash])
+agent "add a --verbose flag to src/main.rs" --tools (expose from-module [read edit])
 
 # attach an external MCP server
 agent "open an issue titled 'hi'" --mcp [["npx" "-y" "@modelcontextprotocol/server-github"]]
@@ -127,10 +127,10 @@ agent "open an issue titled 'hi'" --mcp [["npx" "-y" "@modelcontextprotocol/serv
 agent "…" --tools $tools --json | trace write run.html
 
 # delegation: the model gets a `task` tool that starts a nested run
-agent "audit every file under src/ for unwrap() and summarise" --tools-from [read bash nu-shell task]
+agent "audit every file under src/ for unwrap() and summarise" --tools-from [read edit shell task]
 
 # sessions: opt-in, and ephemeral unless you ask
-agent "start something" --session my-run --tools-from [read write bash]
+agent "start something" --session my-run --tools-from [read write edit shell]
 agent "carry on" --resume --session my-run
 session list
 
@@ -141,7 +141,7 @@ agent chat "what is my project called?" --resume --session conv
 # interactive
 agent tui                          # new conversation
 agent tui --resume                 # the newest one
-agent tui --session my-run --tools-from [read bash nu-shell]
+agent tui --session my-run --tools-from [read shell nu-shell]
 
 # continue something another agent was doing
 handoff list --from claude-code
@@ -153,10 +153,10 @@ agent tui --resume --session picked-up
 
 | tool | what it does |
 |---|---|
-| `read` / `write_file` / `write_range` / `write_replace` | files, local or `--host` |
-| `bash` | run a shell command, local or `--host` |
+| `read` / `write` / `edit` | files, local or `--host`. `write` is a whole file; `edit` replaces text (`--old`/`--new`) or a line range (`--from`/`--to`/`--content`) |
+| `shell` | run a shell command, local or `--host` |
 | `nu-shell` | **run nushell code** — every module below is callable inside it |
-| `calc` | arithmetic, sandboxed to `+ - * / % ^ ( )` |
+| `calc` | arithmetic, sandboxed to `+ - * / % ^ ( )` — not in the default set; a model is worse at arithmetic than at calling a tool, but not so much worse that it earns a slot ahead of `edit` |
 | `host_*` | register hosts/containers; `exec` / `fetch` / `put` / `sync` over ssh or docker |
 | `remote` | run nushell pipelines on a registered host |
 | `peers_*` | enumerate the AI agent processes running on this machine |
@@ -176,7 +176,8 @@ agent tui
 agent tui --resume --session my-run
 ```
 
-`›` prompts; a line is one streamed turn against the session. `/help` lists the
+`›` prompts; a line is one streamed turn against the session. The default tool
+set is `read`, `write`, `edit`, `shell` — the four a coding agent reaches for. `/help` lists the
 commands — `/session`, `/new`, `/resume`, `/tools`, `/model`, `/system`,
 `/history`, `/clear`, `/quit`.
 
@@ -281,7 +282,7 @@ and `rendered` survive, and the tool executor reads only `msg`. Any message mean
 for the model has to fit in `msg`.
 
 **Module names `http` and `reduce` are taken** by builtins; `schema` is too.
-`read`, `write`, `calc`, `bash`, `host`, `remote`, `image`, `peers`, `toon`,
+`read`, `write`, `edit`, `shell`, `calc`, `host`, `remote`, `image`, `peers`, `toon`,
 `style`, `trace`, `context`, `agent`, `policy`, `task` are all free.
 
 **`flatten` recurses into records, and whether it does depends on the input.**

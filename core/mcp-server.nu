@@ -62,9 +62,9 @@ const SERVER_NAME = "agent"
 const SERVER_VERSION = "0.1.0"
 
 # the capabilities this server lends out — the contract, in one place.
-const TOOL_MODULES = ["read" "write" "bash" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon" "task"]
+const TOOL_MODULES = ["read" "write" "edit" "shell" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon" "task"]
 # the default when NU_MCP_MODULES is unset: the six most useful to a coding agent
-const DEFAULT_MODULES = ["nu-shell" "read" "write" "bash" "calc" "host"]
+const DEFAULT_MODULES = ["read" "write" "edit" "shell"]
 
 # parse NU_MCP_MODULES, **without expanding it**.
 # expansion must happen in the child process: this process's module set is frozen at startup

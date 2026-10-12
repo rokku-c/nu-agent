@@ -83,6 +83,26 @@ let results = [
     }
   })
 
+  (case "tui: the status line reports the last request and the session totals" {
+    if not (py-ok) { skipped "tui: the status line reports the last request and the session totals" "no python3"
+    } else if not (needs-creds) { skipped "tui: the status line reports the last request and the session totals" "no credentials"
+    } else {
+      let out = (drive "status" "calc" ["say only: ok"])
+      (has "tui: the status line reports the last request and the session totals" $out "session")
+    }
+  })
+
+  (case "tui: /rewind drops the last turn and nothing more" {
+    # the count in the message was literal text for a while ("dropped 6 - 4
+    # message(s)") because the subtraction sat inside an interpolation
+    if not (py-ok) { skipped "tui: /rewind drops the last turn and nothing more" "no python3"
+    } else if not (needs-creds) { skipped "tui: /rewind drops the last turn and nothing more" "no credentials"
+    } else {
+      let out = (drive "undo" "calc" ["say only: one" "say only: two" "/rewind"])
+      (has "tui: /rewind drops the last turn and nothing more" $out "dropped 2 message")
+    }
+  })
+
   (case "tui: a slash command does not reach the model" {
     if not (py-ok) { skipped "tui: a slash command does not reach the model" "no python3"
     } else {

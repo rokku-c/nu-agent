@@ -29,8 +29,10 @@ let results = [
   })
 
   (case "expose: one module, one tool per exported command" {
-    let names = (expose from-module write | get name)
-    (eq "expose: one module, one tool per exported command" $names ["write_file" "write_range" "write_replace"])
+    # `write` is the whole-file write and `edit` the modifying pair; they were one
+    # module exporting three commands, which read as three tools for two actions
+    let names = [(expose from-module write | get name) (expose from-module edit | get name)]
+    (eq "expose: one module, one tool per exported command" $names [["write"] ["edit"]])
   })
 
   (case "expose: positional params land in properties + required" {

@@ -39,7 +39,7 @@ def read-local [path: path, max_bytes: int]: nothing -> string {
 def read-remote [host: string, path: path, max_bytes: int]: nothing -> string {
   # host fetch caps the transfer with head -c (max+1) internally and errors itself when over.
   # note: this remote path has no UTF-8 check like the local one — a binary comes back
-  # lossily decoded. to pin it down, first run `bash "file <path>" --host <host>`.
+  # lossily decoded. to pin it down, first run `shell "file <path>" --host <host>`.
   try {
     host fetch $host $path --max-bytes $max_bytes
   } catch {|e|
