@@ -173,6 +173,7 @@ def main [
   let already = (($text | lines) | any {|l| ($l | str trim) == $BEGIN })
 
   if $uninstall {
+    print $"config  : ($cfg)$(if $config == null { '  ← your LIVE config' } else { '' })"
     if $uninstall_mcp {
       print (patch-mcp (mcp-config-path $mcp) $r $cfg true)
     }
@@ -190,8 +191,15 @@ def main [
     return
   }
 
+  # when no --config was given the target is whatever config.nu the running nu
+  # loaded, which on a normal machine is THE LIVE ONE. say so loudly: this file
+  # is a mutating installer, and a bare run during development has already put a
+  # block into a real config once.
+  let target_note = (
+    if $config == null { "  ← your LIVE config (pass --config to target another)" } else { "" }
+  )
   print $"repo    : ($r)"
-  print $"config  : ($cfg)"
+  print $"config  : ($cfg)($target_note)"
   print $"modules : ($TOOL_MODULES | length) capabilities + ($CORE_MODULES | length) runtime"
   print $"state   : (if $already { 'already installed — block will be replaced in place' } else { 'not installed yet — block will be appended' })"
   print ""
