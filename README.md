@@ -117,8 +117,8 @@ core/     the runtime — not offered to the model
   agent.nu        the loop: request, stream, tool execution, folding, MCP, skills
   expose.nu       command signatures → tool definitions
   context.nu      context capture and folding
+  policy.nu       the tool permission gate (opt-in; default allow)
   session.nu      (planned) persistence and resume
-  policy.nu       (planned) tool permission gate
   task.nu         (planned) subagent orchestration
   markdown.nu     markdown rendered for a terminal
   style.nu        ANSI colour, off automatically when piped
@@ -131,7 +131,7 @@ core/     the runtime — not offered to the model
   quote.nu        POSIX quoting
 
 tools/    the capabilities — these become the model's tools
-test/     unit · resolve · stream · mcp · e2e
+test/     unit · resolve · stream · policy · mcp · e2e
 ```
 
 **A file's name is its public tool name.** `tools/read.nu` exports `main`, so
@@ -189,6 +189,7 @@ nu test/run.nu unit mcp     # or just some suites
 | `unit` | pure functions — schema generation, folding, markdown, TOON, calc, colour |
 | `resolve` | module resolution **in a child process**, stem uniqueness, the naming contract |
 | `stream` | the SSE state machine, replayed from canned bytes — thinking, tool fragments, no-SSE errors |
+| `policy` | the permission gate: matching, refusal wording, deferral, and enforcement through the tool executor |
 | `mcp` | the real server over real stdio, including stdout purity |
 | `e2e` | a real model endpoint — tool round-trip, streaming, images, traces |
 
@@ -229,10 +230,7 @@ The runtime is whole; what is missing is the machinery around it. In order:
    stays the internal canonical form (the loop, context, trace and MCP already
    speak it), so `anthropic.nu` is a pass-through and all the translation lives
    in `openai.nu`.
-2. **policy** — a gate consulted before a tool runs. Default **allow**: the
-   existing workflow depends on an unrestricted loop, so this is opt-in. A
-   denial becomes an `is_error` tool result, the same shape as any tool failure,
-   so the model can correct itself.
+2. ~~**policy**~~ — done, see `core/policy.nu`.
 3. **session** — persist and resume. The stored message list must be the
    *unfolded* one: folding rewrites the outgoing copy in place, so saving what
    the loop finishes with would persist `[folded] item 7` placeholders and fold

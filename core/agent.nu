@@ -32,6 +32,7 @@ use ./context.nu
 use ./markdown.nu
 use ./style.nu
 use ./mcp.nu
+use ./policy.nu
 use ./provider.nu
 use ../tools/image.nu
 
@@ -137,6 +138,23 @@ def stream-api-call [
   } $timeout $show_thinking $render (style enabled) {|st, c, o| markdown stream-step $st $c $o } {|st, o| markdown stream-flush $st $o }
 }
 
+# consult the policy for one tool call and, if it is not allowed, raise.
+#
+# raising rather than returning is the whole design: the caller sits inside the
+# tool executor's try/catch, and a raised error becomes an ordinary is_error
+# tool_result the model can read and correct itself from. `error make`'s msg is
+# the only field a catch can read (measured), so the messages are self-contained.
+#
+# an `ask` is resolved once here — `policy defer` writes a pending record, so
+# calling it to inspect the outcome would record the same call twice.
+def gate [tool: string, command: string, input: any]: nothing -> nothing {
+  let v = (policy check {tool: $tool, command: $command, input: $input})
+  if $v.decision == "allow" { return }
+  let d = (if $v.decision == "ask" { policy defer $v } else { $v })
+  if $d.decision == "deny" { error make { msg: (policy refuse-message $d) } }
+  if $d.decision == "defer" { error make { msg: (policy defer-message $d) } }
+}
+
 # pick blocks of a given type out of content
 def blocks-of [body: record, kind: string]: nothing -> list {
   ($body | get --optional content | default []) | where type == $kind
@@ -237,6 +255,14 @@ export def "invoke-tool" [
       # --config is required, otherwise the subprocess doesn't load config.nu and can't find module commands.
       let script = (build-script $target $input)
       if $verbose { vprint $"- run: `($script)`" }
+
+      # ── the policy gate ──
+      # positioned deliberately: AFTER build-script, because `command` patterns
+      # match on the assembled line and gating earlier would have nothing to
+      # match; and INSIDE the try, so a denial becomes an is_error tool_result
+      # rather than propagating through the loop's `each` closure and killing
+      # the run.
+      gate $tool_name $script $input
 
       # A record result is serialized to JSON before it leaves the subprocess.
       #
@@ -346,6 +372,7 @@ export def chat [
   --system (-s): string           # system prompt
   --model (-m): string            # model name, defaults to the provider's own env var
   --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
+  --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
   --max-tokens (-t): int = 2048   # max output tokens; note that thinking blocks also spend from it
   --temperature (-T): float       # sampling temperature, server default when omitted
   --timeout: duration = 120sec    # request timeout
@@ -356,6 +383,8 @@ export def chat [
   --image: list<path>             # attach images to the question (vision models only)
   --json (-j)                     # return the full response record instead of plain text
 ]: nothing -> any {
+  if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
+
   let p = (dialect $provider)
   let model = (strip-alias ($model | default (default-model $p)))
   let tools = (normalize-tools $tools)
@@ -527,6 +556,7 @@ export def main [
   --system (-s): string           # system prompt
   --model (-m): string
   --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
+  --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
   --max-tokens (-t): int = 4096
   --temperature (-T): float
   --timeout: duration = 120sec
@@ -545,6 +575,8 @@ export def main [
   --skill: list<path>             # mount SKILL.md files explicitly; their body joins the system prompt
   --image: list<path>             # attach images to the opening question (vision models only)
 ]: nothing -> any {
+  if $policy != null { $env.NU_POLICY_FILE = ($policy | path expand) }
+
   let p = (dialect $provider)
   let model = (strip-alias ($model | default (default-model $p)))
   let tools = (normalize-tools $tools)
@@ -737,8 +769,20 @@ export def main [
           # An MCP tool goes back to its server; anything else is a nu command.
           let r = (
             if (($mmap | columns) | any {|k| $k == $tname }) {
-              let out = (mcp call ($mmap | get $tname) $tname ($c | get --optional input | default {}))
-              {type: "tool_result", tool_use_id: ($c | get --optional id | default ""), content: $out.text, is_error: $out.is_error}
+              # MCP tools never reach invoke-tool, so the gate is repeated here —
+              # without it a policy would cover every nu-command tool and quietly
+              # not cover anything reached over MCP. there is no assembled command
+              # line on this path, so `command` patterns cannot match here; `tool`
+              # and `path` ones still do.
+              let input = ($c | get --optional input | default {})
+              let id = ($c | get --optional id | default "")
+              let refusal = (try { gate $tname "" $input; null } catch {|e| ($e.msg | into string) })
+              if $refusal != null {
+                {type: "tool_result", tool_use_id: $id, content: $refusal, is_error: true}
+              } else {
+                let out = (mcp call ($mmap | get $tname) $tname $input)
+                {type: "tool_result", tool_use_id: $id, content: $out.text, is_error: $out.is_error}
+              }
             } else {
               invoke-tool $c $map $max_output $timeout $verbose
             }

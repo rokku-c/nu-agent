@@ -52,5 +52,8 @@ use ../core/context.nu
 use ../core/expose.nu
 use ../core/markdown.nu
 use ../core/mcp.nu
+# policy is runtime machinery (agent.nu imports it privately), but the tests
+# exercise its rule matching directly rather than only through a live run
+use ../core/policy.nu
 use ../core/style.nu
 use ../core/trace.nu
