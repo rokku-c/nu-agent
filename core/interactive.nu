@@ -30,6 +30,11 @@
 
 use ./session.nu
 
+# "" and null both mean "not set" — see the note where sid is resolved.
+def unset [v: any]: nothing -> any {
+  if $v == null or $v == "" { null } else { $v }
+}
+
 const HISTORY_FILE = "tui-history.txt"
 
 # where reedline keeps the input history. under the session store, so a project
@@ -49,6 +54,8 @@ const HELP = [
   "  /tools [a,b,c]     show or set which capability modules are offered"
   "  /model [name]      show or set the model"
   "  /system [text]     show or set the system prompt"
+  "  /verbose           toggle showing tool calls and their results"
+  "  /thinking          toggle streaming the model's reasoning"
   "  /history [n]       the last n turns of this session"
   "  /clear             clear the screen"
   "  /quit  /exit       leave"
@@ -88,10 +95,15 @@ export def repl [
   --provider (-p): string
   --system (-s): string
   --max-tokens (-t): int = 4096
+  --verbose (-v)                  # show tool calls and their results
+  --show-thinking                 # stream the model's reasoning
   --no-save
 ]: nothing -> nothing {
   # ── the starting session ──
-  mut sid = ($session | default null)
+  # `unset`, because a wrapper passing "" means the same as not passing it,
+  # and "" is not null — the check below would skip and every turn would run
+  # with an empty session id.
+  mut sid = (unset $session)
   mut resuming = $resume
   if $resuming and ($sid == null) {
     let newest = (session last)
@@ -108,8 +120,13 @@ export def repl [
   }
 
   mut tools = $tools_from
-  mut model = $model
-  mut sys = $system
+  mut model = (unset $model)
+  mut sys = (unset $system)
+  # toggled at runtime, because whether you want the machinery visible depends on
+  # what you are doing — reading a tool's output matters when it is wrong and is
+  # noise when it is not
+  mut verbose = $verbose
+  mut thinking = $show_thinking
 
   print (banner $sid ($model | default "(from env)") ($provider | default "(inferred)") $tools)
   print ""
@@ -168,7 +185,7 @@ export def repl [
           print $"tools: ($tools | str join ', ')"
         }
       } else if $cmd == "/model" {
-        if ($rest | is-empty) { print $"model: ($model | default 'from env')" } else { $model = $rest; print $"model: ($model)" }
+        if ($rest | is-empty) { print $"model: ($model | default 'from env')" } else { $model = (unset $rest); print $"model: ($rest)" }
       } else if $cmd == "/system" {
         if ($rest | is-empty) {
           print $"system: ($sys | default '(none)')"
@@ -176,6 +193,12 @@ export def repl [
           $sys = $rest
           print $"system: ($sys)"
         }
+      } else if ($cmd in ["/verbose" "/v"]) {
+        $verbose = (if ($rest | is-empty) { not $verbose } else { $rest in ["on" "true" "1"] })
+        print $"verbose: (if $verbose { 'on — tool calls and results' } else { 'off' })"
+      } else if ($cmd in ["/thinking" "/think"]) {
+        $thinking = (if ($rest | is-empty) { not $thinking } else { $rest in ["on" "true" "1"] })
+        print $"thinking: (if $thinking { 'on — the reasoning stream' } else { 'off' })"
       } else if $cmd == "/history" {
         let n = (if ($rest | is-empty) { 6 } else { $rest | into int })
         if not (session exists $sid) {
@@ -201,6 +224,7 @@ export def repl [
         line: $text, session: $sid, resume: $resuming
         tools: $tools, model: $model, provider: $provider, system: $sys
         max_tokens: $max_tokens, no_save: $no_save
+        verbose: $verbose, thinking: $thinking
       }
       # after the first turn the session exists, so it is resumed from then on
       $resuming = true

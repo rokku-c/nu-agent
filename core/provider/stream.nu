@@ -86,6 +86,16 @@ export def apply-event [
 
   if $t == "text_delta" {
     let piece = ($ev | get --optional text | default "")
+    # close the thinking block before the answer starts. the thinking stream goes
+    # to stderr and the text to stdout, and neither emits a trailing newline — so
+    # without this the first words of the reply land on the end of the last
+    # thinking line ("… 88 * 77 = 6776").
+    if ($a | get --optional th_open | default false) {
+      print -e ""
+      return (
+        (apply-event $ev ($a | upsert th_open false) $show_thinking $render $on $md_step $md_flush)
+      )
+    }
     if $render {
       # line-buffered rendering: markdown is block-level syntax, so a chunk that
       # isn't finished cannot be rendered (code fences especially); hand it to

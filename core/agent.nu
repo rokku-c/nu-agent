@@ -376,17 +376,39 @@ export def tui [
   --provider (-p): string
   --system (-s): string
   --max-tokens (-t): int = 4096
+  --verbose (-v)                  # show each tool call and a preview of its result
+  --show-thinking                 # stream the model's reasoning to stderr
   --no-save
 ]: nothing -> nothing {
   # the turn is supplied here, because a module cannot see the caller's scope —
   # see the note in interactive.nu. every flag goes on every turn with "" meaning
   # unset, since nushell cannot build a flag list to splat into a custom command.
   interactive repl --send {|t|
-    # straight into turn-run with values. going through `agent chat` would mean
-    # rebuilding a flag list, which nushell cannot splat into a custom command —
-    # and `turn-run` is the same code either way.
-    chat-turn $t
-  } --session ($session | default "") --resume=$resume --tools-from $tools_from --model ($model | default "") --provider ($provider | default "") --system ($system | default "") --max-tokens $max_tokens --no-save=$no_save
+    # the LOOP, not `chat`. `chat` passes tool definitions to the model and never
+    # executes them, so a TUI built on it advertises tools it does not run — the
+    # model calls one, nothing comes back, and the reply has no text at all.
+    # the loop runs tools, folds context and writes the session; the TUI only
+    # owns the terminal.
+    # `main`, not `agent`: the public name does not resolve to this module from
+    # inside it, and this machine has an unrelated `agent` binary on PATH — so
+    # `agent …` silently ran THAT, which is where "lists are not automatically
+    # spread when calling external commands" came from. `main` is the loop.
+    #
+    # the record form, because it is the only way to pass a flag nushell cannot
+    # build: keys must be spelled exactly as the flag, hyphens included, and
+    # switches work. rebuilding a flag list by branching would be four copies of
+    # this line and would grow with every toggle added.
+    main $t.line ...{
+      "tools-from": $t.tools
+      "session": $t.session
+      "stream": true
+      "md": true
+      "max-tokens": $t.max_tokens
+      "resume": ($t.resume | default false)
+      "verbose": ($t.verbose | default false)
+      "show-thinking": ($t.thinking | default false)
+    }
+  } --session $session --resume=$resume --tools-from $tools_from --model $model --provider $provider --system $system --max-tokens $max_tokens --verbose=$verbose --show-thinking=$show_thinking --no-save=$no_save
 }
 
 # show the config currently in effect (never the token contents)
@@ -486,43 +508,6 @@ def turn-run [
   }
 
   $body
-}
-
-# one interactive turn, from a record of values.
-#
-# the session work is `chat`'s, so this mirrors the front end — but it takes a
-# record rather than flags because a closure cannot be handed a command line.
-def chat-turn [t: record]: nothing -> any {
-  let p = (dialect (unset $t.provider))
-  let prior = (
-    if $t.resume and ($t.session | is-empty) { session last }     else if $t.resume { session load $t.session }     else { null }
-  )
-  let w = (session window $prior null)
-  let prefix = $w.prefix
-  let history = $w.loaded
-  let explicit_id = (if ($t.session | is-not-empty) { $t.session } else { null })
-  let save_it = ((not ($t.no_save | default false)) and (($explicit_id != null) or ($prior != null)))
-  let sid = ($explicit_id | default (if $prior != null { $prior | get --optional id } else { null }))
-
-  let handoff_note = (
-    if $prior == null or (($prior | get --optional handoff) == null) { "" }     else { handoff note $prior.handoff ($history | length) ($prior.handoff | get --optional messages | default 0) }
-  )
-  let system = (unset $t.system)
-  let system = (
-    if ($handoff_note | is-empty) { $system }     else if $system == null { $handoff_note }     else { $"($system)
-
----
-
-($handoff_note)" }
-  )
-  let model = (strip-alias ((unset $t.model) | default (
-    if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
-  )))
-  let from_modules = ($t.tools | default [] | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
-  let tools = (normalize-tools $from_modules)
-
-  let messages = ($history | append {role: "user", content: $t.line})
-  turn-run $p $messages $prefix $sid $save_it $t.line $tools $system $model $t.max_tokens null 120sec true true false
 }
 
 # send one message to the model, return the reply text
