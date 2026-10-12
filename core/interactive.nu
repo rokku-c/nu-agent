@@ -138,9 +138,12 @@ export def repl [
   # — and therefore this whole loop — has to be bare. Ctrl-D ends the session
   # through nushell's own error path; /quit is the clean way out, and either way
   # the turn-by-turn saves mean nothing is lost.
+  mut turn = 0
   mut running = true
   while $running {
-    let line = (input --reedline --history-file (history-path) "› ")
+    # the turn number rides in the prompt, which is the only place it can be
+    # without adding a line of its own
+    let line = (input --reedline --history-file (history-path) $"Turn ($turn + 1) › ")
     let text = ($line | str trim)
     if ($text | is-empty) { continue }
 
@@ -228,6 +231,7 @@ export def repl [
       }
       # after the first turn the session exists, so it is resumed from then on
       $resuming = true
+      $turn = $turn + 1
       if $no_save { print -e "(not saved: --no-save)" }
     } catch {|e|
       # a failed turn must not take the session down with it — the transcript so

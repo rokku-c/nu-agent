@@ -34,6 +34,12 @@ export def seed []: nothing -> record {
   }
 }
 
+# The faint grey the reasoning stream wears. `ansi grey` is not a colour nushell
+# has, and the codes are emitted by hand because whether to colour at all is the
+# caller's `on` flag, not this layer's business.
+def grey-on []: nothing -> string { (char -i 27) + "[90m" }
+def grey-off []: nothing -> string { (char -i 27) + "[39m" }
+
 # replace the nth item of the current block outright.
 # avoid variable-indexed cell paths like `update blocks.$i.xxx` — they surprise
 # you; rebuilding the list is the most reliable.
@@ -91,6 +97,7 @@ export def apply-event [
     # without this the first words of the reply land on the end of the last
     # thinking line ("… 88 * 77 = 6776").
     if ($a | get --optional th_open | default false) {
+      if $on { print -e -n (grey-off) }
       print -e ""
       return (
         (apply-event $ev ($a | upsert th_open false) $show_thinking $render $on $md_step $md_flush)
@@ -116,10 +123,11 @@ export def apply-event [
   if $t == "thinking_delta" {
     let piece = ($ev | get --optional text | default "")
     if $show_thinking {
+      # grey, with no header. a header was a line of chrome before every thought;
+      # grey says the same thing wordlessly and stays out of the way when the
+      # reasoning is long. it goes to stderr, so a redirect never sees it.
       if not ($a | get --optional th_open | default false) {
-        print -e ""
-        print -e "### thinking"
-        print -e ""
+        if $on { print -e -n (grey-on) }
       }
       print -e -n $piece
       return ($a | upsert th_open true | upsert blocks (replace-block $a.blocks $bi {|b| $b | upsert thinking ($b.thinking + $piece) }))
@@ -150,6 +158,11 @@ export def apply-event [
   }
 
   if $t == "message_stop" {
+    # leave the terminal out of grey even if the thinking was the last thing sent
+    if $show_thinking and ($a | get --optional th_open | default false) {
+      if $on { print -e -n (grey-off) }
+      print -e ""
+    }
     # the last line usually has no newline; emit the leftover buffer when wrapping up
     if $render {
       let st = ($a | get --optional mdstate | default {buf: "", in_fence: false})

@@ -941,7 +941,7 @@ export def main [
     }
 
     if $verbose { vprint $"
-## round ($rounds + 1)
+**Round ($rounds + 1)**
 " }
 
     let attempt = (try {
