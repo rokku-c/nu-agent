@@ -14,11 +14,24 @@
 const SUITES = [
   {name: "unit",    covers: "pure functions, no network"}
   {name: "resolve", covers: "module resolution + the naming contract"}
+  {name: "financial", covers: "the series kernel: returns, risk, statistics, and the definition contract"}
+  {name: "macro",   covers: "the data layer: point-in-time records from canned payloads, and transcription"}
+  {name: "cache",   covers: "the TTL store: cadence, expiry, and the fetch archive"}
+  {name: "market",  covers: "the market data layer: curves, quotes, K-lines (canned payloads)"}
+  {name: "pred",    covers: "the append-only prediction record, scoring, and calibration"}
+  {name: "backtest", covers: "the execution engine: fills, lots, limits and costs on synthetic bars"}
+  {name: "trig", covers: "rules stated in advance: nodes, price conditions, and the daily check"}
+  {name: "daily", covers: "the daily node: watchlist, run, and the archive it leaves"}
+  {name: "factor", covers: "the factor catalogue and its guards (the test itself needs live history)"}
+  {name: "filings", covers: "SEC EDGAR: facts with filing dates, and the point-in-time cut"}
+  {name: "options", covers: "derivatives: the OCC symbol decoder (chains are fetched)"}
   {name: "openai",  covers: "the OpenAI dialect's translation and stream state"}
   {name: "stream",  covers: "the SSE state machine, replayed from canned bytes"}
   {name: "policy",  covers: "the tool permission gate"}
+  {name: "handoff", covers: "importing another agent's conversation"}
   {name: "session", covers: "persistence, resume and the unfolded-history invariant"}
   {name: "task",    covers: "subagent orchestration, depth and capability guards"}
+  {name: "tui",     covers: "the interactive mode, driven through a pty"}
   {name: "mcp",     covers: "the MCP server over real stdio"}
   {name: "e2e",     covers: "a real model endpoint (needs credentials)"}
 ]

@@ -42,6 +42,23 @@ const TOOL_MODULES = ["edit" "proc" "host" "image" "jsonschema" "nu-shell" "peer
 # task is a capability (the model calls it), but it is not in tools/ — it is a
 # wrapper around the loop, and belongs beside it
 const CORE_MODULES = ["agent" "context" "expose" "handoff" "interactive" "markdown" "mcp" "policy" "session" "style" "task" "trace"]
+# ── and the apps ──
+# composed capability sets, opt-in and per-directory. they were NOT installed by this script
+# until now, and that omission had a failure mode worth recording: `use`ing an app at the
+# prompt makes it work for YOU and not for a tool call, because every tool call is a child
+# process that re-reads this config — so the tools resolved, the model called them, and every
+# call came back "Command `market` not found". installing them here is what closes that gap.
+#
+# listed explicitly, not globbed: the block is TEXT written into config.nu, and `use` is
+# resolved at parse time, so it cannot expand a glob — measured, it fails with "module
+# apps/financial/*.nu not found". the internal halves (cache, *-parse) are deliberately left
+# out: their consumers `use` them privately, and naming them here would surface them at the
+# top level where they would become tools.
+const APP_MODULES = [
+  "financial/series" "financial/macro" "financial/market" "financial/pred"
+  "financial/backtest" "financial/trig" "financial/daily" "financial/factor"
+  "financial/filings" "financial/options"
+]
 
 def root []: nothing -> path {
   # a SCRIPT (unlike a module body) does see $env.FILE_PWD at eval time — measured.
@@ -61,6 +78,7 @@ def block [r: path]: nothing -> string {
     [$"$env.NU_AGENT_ROOT = \"($r)\""]
     | append ($TOOL_MODULES | each {|m| $"use ($r)/tools/($m).nu" })
     | append ($CORE_MODULES | each {|m| $"use ($r)/core/($m).nu" })
+    | append ($APP_MODULES | each {|m| $"use ($r)/apps/($m).nu" })
   )
   ([$BEGIN] | append $lines | append [$END]) | str join (char nl)
 }
@@ -162,6 +180,7 @@ def main [
   let missing = (
     ($TOOL_MODULES | each {|m| $"($r)/tools/($m).nu" })
     | append ($CORE_MODULES | each {|m| $"($r)/core/($m).nu" })
+    | append ($APP_MODULES | each {|m| $"($r)/apps/($m).nu" })
     | where {|p| not ($p | path exists) }
   )
   if ($missing | is-not-empty) {
