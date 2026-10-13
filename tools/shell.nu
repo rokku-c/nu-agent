@@ -28,40 +28,9 @@
 # remote only covers the ssh connect phase — once connected, a hung command still needs Ctrl-C.
 
 use ./host.nu
+use ../core/shells.nu
 
 const DEFAULT_MAX_OUTPUT = 8000
-
-# ── which shell ──
-# bash, NOT $SHELL. on this machine SHELL is fish, and a model writing bash
-# idioms into fish gets a screenful of syntax errors for its trouble. the shell
-# is something the caller chooses, not something inherited from the environment
-# the agent happens to be launched in.
-const DEFAULT_SHELL = "/bin/bash"
-
-# the shells this machine offers, from /etc/shells — which is the file that
-# exists for exactly this question, and is what chsh reads.
-export def available []: nothing -> list<string> {
-  let f = "/etc/shells"
-  if not ($f | path exists) { return [$DEFAULT_SHELL] }
-  open --raw $f
-  | lines
-  | each {|l| $l | str trim }
-  | where {|l| ($l | is-not-empty) and (not ($l | str starts-with "#")) and ($l | path exists) }
-}
-
-# the shell a call runs through, most specific first: the flag on this call, then
-# $env.NU_AGENT_SHELL, then bash.
-export def resolve [flag: any]: nothing -> string {
-  let chosen = (
-    if $flag != null and ($flag | is-not-empty) { $flag }
-    else if (($env.NU_AGENT_SHELL? | default "") | is-not-empty) { $env.NU_AGENT_SHELL }
-    else { $DEFAULT_SHELL }
-  )
-  if not ($chosen | path exists) {
-    error make { msg: $"no such shell: ($chosen). see what this machine has with `shell --list`" }
-  }
-  $chosen
-}
 
 def clamp [s: string, n: int]: nothing -> string {
   if ($s | str length) > $n {
@@ -115,14 +84,14 @@ export def main [
 ]: nothing -> any {
   # --list answers "what can I switch to", which is why the command is optional
   if $list {
-    let now = (resolve $shell)
-    return (available | each {|p| {shell: $p, default: ($p == $now)} })
+    let now = (shells resolve $shell)
+    return (shells available | each {|p| {shell: $p, default: ($p == $now)} })
   }
   if $command == null {
     error make { msg: "give a command to run, or --list to see the shells this machine offers" }
   }
 
-  let sh = (resolve $shell)
+  let sh = (shells resolve $shell)
 
   # remote runs always go through `sh -c` on the far end — see wrap in host.nu.
   # --shell is a local choice; a remote's shells are the remote's business.

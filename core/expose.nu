@@ -16,6 +16,13 @@
 #   - oneof<...> union types degrade to "unconstrained" (empty schema)
 #   - only modules already `use`d are recognized
 
+# ── command names that are not tool names ──
+# nu's parser owns some words outright — `exec` is a keyword, and keywords cannot
+# be shadowed, so there can be no command named `exec` (nor `run`). the tool a
+# model is offered is a different namespace from the commands nu parses, and this
+# is where they are allowed to differ: the module is `proc`, the tool is `exec`.
+const PUBLIC_NAMES = {proc: "exec"}
+
 # nu's syntax_shape → JSON Schema fragment
 #
 # syntax_shape is parameterised (list<int> / table<a: int> / record<...>),
@@ -60,6 +67,18 @@ def shape->schema [s: any]: nothing -> record {
   }
 
   {}
+}
+
+# Rename a module's own tool to its public name, when it has one.
+#
+# the pattern needs -r: plain `str replace` is literal in nushell, so "^proc"
+# was being searched for as those five characters and never matched — the rename
+# ran, reported the right target, and changed nothing.
+def public-name [t: record, module: string]: nothing -> record {
+  let as = ($PUBLIC_NAMES | get --optional $module)
+  if $as == null { return $t }
+  let base = ($module | str replace -a ' ' '_')
+  $t | upsert name ($t.name | str replace -r $"^($base)" $as)
 }
 
 def snake-case [s: string]: nothing -> string {
@@ -179,4 +198,5 @@ export def from-module [
   | where {|c| $ids | any {|id| $id == $c.decl_id } }
   | each {|c| command->tool $c $snake $prefix }
   | compact
+  | each {|t| (public-name $t $module) }
 }

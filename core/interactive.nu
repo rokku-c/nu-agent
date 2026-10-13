@@ -29,6 +29,7 @@
 # and remembered here; the transcript keeps only what was actually said.
 
 use ./session.nu
+use ./shells.nu
 
 # "" and null both mean "not set" — see the note where sid is resolved.
 def unset [v: any]: nothing -> any {
@@ -123,7 +124,7 @@ export def repl [
   --model (-m): string
   --provider (-p): string
   --system (-s): string
-  --max-tokens (-t): int = 4096
+  --max-tokens (-t): int = 32000   # see the note in agent.nu: thinking spends from this too
   --verbose (-v)                  # show tool calls and their results
   --show-thinking                 # stream the model's reasoning
   --no-save
@@ -245,14 +246,14 @@ export def repl [
         }
       } else if $cmd == "/shell" {
         if ($rest | is-empty) {
-          print $"shell: (shell resolve null)"
-          print $"  available: (shell available | each {|p| $p | path basename } | str join ', ')"
+          print $"shell: (shells resolve null)"
+          print $"  available: (shells available | each {|p| $p | path basename } | str join ', ')"
         } else {
           # a basename is enough: /bin/fish and /opt/homebrew/bin/fish are the same answer
           let want = ($rest | path basename)
-          let hit = (shell available | where {|p| ($p | path basename) == $want })
+          let hit = (shells available | where {|p| ($p | path basename) == $want })
           if ($hit | is-empty) {
-            print -e $"no shell named ($want). try: (shell available | each {|p| $p | path basename } | str join ', ')"
+            print -e $"no shell named ($want). try: (shells available | each {|p| $p | path basename } | str join ', ')"
           } else {
             $env.NU_AGENT_SHELL = $hit.0
             print $"shell: ($hit.0) — for the rest of this session"

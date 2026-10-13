@@ -104,6 +104,22 @@ let results = [
     (eq "resolve: the runtime modules are NOT offered as tools" $leaked [])
   })
 
+  (case "resolve: a module whose name nu owns is offered under its public name" {
+    # `exec` is a parser keyword, so the command cannot be called that; the tool
+    # can. the rename lives in expose.nu and silently did nothing for a while —
+    # `str replace` is literal, so "^proc" was searched for as those characters.
+    let names = (expose from-module proc | get name)
+    (eq "resolve: a module whose name nu owns is offered under its public name" $names ["exec"])
+  })
+
+  (case "resolve: no capability module leaks one of its own helpers as a tool" {
+    # a helper exported from a capability module becomes a tool, because the MCP
+    # allowlist is per module. shell_available and shell_resolve did exactly that.
+    let names = ($TOOL_MODULES | each {|m| expose from-module $m } | flatten | get name)
+    let leaked = ($names | where {|n| ($n | str contains "resolve") or ($n | str contains "available") or ($n | str contains "clamp") })
+    (eq "resolve: no capability module leaks one of its own helpers as a tool" $leaked [])
+  })
+
   (case "resolve: internal helpers stay out of the top-level module scope" {
     # layout and quote are used only *inside* other modules, which is what keeps
     # them from becoming tools (measured: a plain, non-export `use` inside a

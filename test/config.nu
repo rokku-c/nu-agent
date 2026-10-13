@@ -72,6 +72,7 @@ use ../core/policy.nu
 use ../core/handoff.nu
 use ../core/interactive.nu
 use ../core/session.nu
+use ../core/shells.nu
 use ../core/task.nu
 use ../core/style.nu
 use ../core/trace.nu

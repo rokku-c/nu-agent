@@ -6,9 +6,9 @@
 # same way. so the FILE and the COMMAND are `proc`, and the tool a model is
 # offered is `proc` too, because the tool name is derived from the module name.
 #
-# giving it the tool name `exec` needs a rename where commands become tools —
-# in core/expose.nu — and the attempt at that did not take effect. it is a small,
-# self-contained piece of work; until it lands, call it `proc`.
+# the TOOL is still `exec`: nu's parser and the tool list are different
+# namespaces, and core/expose.nu renames this module's tool on the way out
+# (PUBLIC_NAMES).
 #
 #   use proc.nu
 #   exec "git" ["status" "--short"]
