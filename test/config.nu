@@ -36,6 +36,7 @@ if ($env.ANTHROPIC_AUTH_TOKEN? | is-empty) {
 # ── capabilities: these are what the MCP allowlist exposes ──
 use ../tools/shell.nu
 use ../tools/calc.nu
+use ../tools/proc.nu
 use ../tools/host.nu
 use ../tools/image.nu
 use ../tools/jsonschema.nu
@@ -50,6 +51,14 @@ use ../tools/write.nu
 # ── apps: composed capability sets, not installed by install.nu ──
 use ../apps/financial/series.nu
 use ../apps/financial/macro.nu
+use ../apps/financial/market.nu
+use ../apps/financial/pred.nu
+use ../apps/financial/backtest.nu
+use ../apps/financial/trig.nu
+use ../apps/financial/daily.nu
+use ../apps/financial/factor.nu
+use ../apps/financial/filings.nu
+use ../apps/financial/options.nu
 
 # ── runtime: loaded, but only what the allowlist names becomes a tool ──
 use ../core/agent.nu

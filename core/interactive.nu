@@ -82,6 +82,7 @@ const HELP = [
   "  /system [text]     show or set the system prompt"
   "  /rewind            drop the last turn, so you can ask it again"
   "  /status            context and token totals for this session"
+  "  /shell [name]      which shell the shell tool runs through (a path or a basename)"
   "  /verbose           toggle showing tool calls and their results"
   "  /thinking          toggle streaming the model's reasoning"
   "  /history [n]       the last n turns of this session"
@@ -240,6 +241,22 @@ export def repl [
             $rec | upsert messages ($msgs | first $last_user) | session store | ignore
             print $"dropped (($msgs | length) - $last_user) message\(s\), back to before your last turn"
             print "  ask again and it continues from there"
+          }
+        }
+      } else if $cmd == "/shell" {
+        if ($rest | is-empty) {
+          print $"shell: (shell resolve null)"
+          print $"  available: (shell available | each {|p| $p | path basename } | str join ', ')"
+        } else {
+          # a basename is enough: /bin/fish and /opt/homebrew/bin/fish are the same answer
+          let want = ($rest | path basename)
+          let hit = (shell available | where {|p| ($p | path basename) == $want })
+          if ($hit | is-empty) {
+            print -e $"no shell named ($want). try: (shell available | each {|p| $p | path basename } | str join ', ')"
+          } else {
+            $env.NU_AGENT_SHELL = $hit.0
+            print $"shell: ($hit.0) — for the rest of this session"
+            print "  (set NU_AGENT_SHELL in your environment to make it stick)"
           }
         }
       } else if $cmd == "/status" {

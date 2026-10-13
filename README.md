@@ -154,7 +154,8 @@ agent tui --resume --session picked-up
 | tool | what it does |
 |---|---|
 | `read` / `write` / `edit` | files, local or `--host`. `write` is a whole file; `edit` replaces text (`--old`/`--new`) or a line range (`--from`/`--to`/`--content`) |
-| `shell` | run a shell command, local or `--host` |
+| `shell` | run a shell command, local or `--host`. `--list` shows the shells this machine has; `--shell fish` runs one call through another; `$env.NU_AGENT_SHELL` changes the default |
+| `proc` | run a program with argv, **no shell in between** — nothing re-splits an argument, so a filename with a space or a `$(…)` is just a filename. Local only: a remote argv would have to travel through the far end's shell, which is the thing this avoids. (Called `proc` because `exec` and `run` are nushell parser keywords and cannot be command names.) |
 | `nu-shell` | **run nushell code** — every module below is callable inside it |
 | `calc` | arithmetic, sandboxed to `+ - * / % ^ ( )` — not in the default set; a model is worse at arithmetic than at calling a tool, but not so much worse that it earns a slot ahead of `edit` |
 | `host_*` | register hosts/containers; `exec` / `fetch` / `put` / `sync` over ssh or docker |
@@ -177,7 +178,9 @@ agent tui --resume --session my-run
 ```
 
 `›` prompts; a line is one streamed turn against the session. The default tool
-set is `read`, `write`, `edit`, `shell` — the four a coding agent reaches for. `/help` lists the
+set is `read`, `write`, `edit`, `shell` — the four a coding agent reaches for.
+`/shell fish` switches which shell `shell` runs through for the rest of the
+session. `/help` lists the
 commands — `/session`, `/new`, `/resume`, `/tools`, `/model`, `/system`,
 `/history`, `/clear`, `/quit`.
 

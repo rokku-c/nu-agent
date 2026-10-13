@@ -161,6 +161,7 @@ export def from-commands [
   | compact
 }
 
+
 # given a module name (which must already be `use`d), convert every exported command in it to a tools array
 export def from-module [
   module: string        # module name, e.g. "shell"
