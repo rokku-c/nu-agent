@@ -28,6 +28,22 @@ const DEFAULT_MAX_OUTPUT = 8000
 # measured: models behind this gateway have a 1048576 token window; ~15% headroom left by default
 const DEFAULT_CONTEXT_BUDGET = 890_000
 
+# ── max_tokens ──
+# the Messages API REQUIRES this field — there is no "unlimited" to omit it for — and 128K is
+# the ceiling on the current models. that is NOT 1M: 1M is the CONTEXT window, a different
+# number the API rejects here rather than clamping.
+#
+# the old defaults were far too low, and the failure was quiet rather than loud: THINKING
+# BLOCKS SPEND FROM THIS BUDGET TOO. on a hard question a 4096 budget can be consumed entirely
+# by reasoning before any text is emitted, so the turn ends with `stop_reason: max_tokens` and
+# an empty reply — which reads like the model declined to answer rather than like a budget
+# that was too small.
+const DEFAULT_MAX_TOKENS = 32000
+# the ceiling, used when `--stream` makes a big budget safe. a non-streaming 128K request can
+# outlive the 120s timeout, and the tokens generated before it are billed anyway — so the
+# ceiling is the default only on the path the large values are meant to take.
+const MAX_OUTPUT_TOKENS = 128000
+
 use ./context.nu
 use ./expose.nu
 use ./handoff.nu
@@ -375,7 +391,7 @@ export def tui [
   --model (-m): string
   --provider (-p): string
   --system (-s): string
-  --max-tokens (-t): int = 4096
+  --max-tokens (-t): int = 32000
   --verbose (-v)                  # show each tool call and a preview of its result
   --show-thinking                 # stream the model's reasoning to stderr
   --no-save
@@ -517,7 +533,7 @@ export def chat [
   --model (-m): string            # model name, defaults to the provider's own env var
   --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
   --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
-  --max-tokens (-t): int = 2048   # max output tokens; note that thinking blocks also spend from it
+  --max-tokens (-t): int = 32000   # thinking blocks spend from this too, which is why the old 2048 was far too low
   --temperature (-T): float       # sampling temperature, server default when omitted
   --timeout: duration = 120sec    # request timeout
   --tools: list                   # tool definitions (expose output); supplying them can trigger tool_use
@@ -703,7 +719,7 @@ export def main [
   --model (-m): string
   --provider (-p): string         # anthropic (default), else $env.NU_AGENT_PROVIDER
   --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
-  --max-tokens (-t): int = 4096
+  --max-tokens (-t): int          # omitted = 128000 with --stream, 32000 without — see the note above
   --temperature (-T): float
   --timeout: duration = 120sec
   --max-rounds (-r): int          # omitted = unlimited rounds, runs until the model wraps up itself
@@ -757,6 +773,12 @@ export def main [
   let system = (
     if $system != null { $system }     else if $prior != null { ($prior | get --optional system) }     else { null }
   )
+
+  # max_tokens: omitted falls to the ceiling when STREAMING and to a timeout-safe number when
+  # not. the split is not fussiness — a non-streaming request with a 128K budget can outlive
+  # the 120s timeout, and the tokens generated before it are billed anyway. streaming is the
+  # path the large values are meant to take.
+  let max_tokens = ($max_tokens | default (if $stream { $MAX_OUTPUT_TOKENS } else { $DEFAULT_MAX_TOKENS }))
 
   # tools come from module names when given — and on resume they are taken from
   # the record as NAMES, so the set is re-resolved rather than replayed from a
