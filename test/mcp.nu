@@ -37,6 +37,15 @@ let results = [
     (eq "mcp: tools/list returns the default capability set" $names ["edit" "read" "shell" "write"])
   })
 
+  (case "mcp: the allowlist names modules, so proc is offered as exec" {
+    # naming the TOOL in the allowlist loads nothing, and the failure is silent:
+    # a missing module is a stderr note while an empty tool list is a legal
+    # answer. `exec` is a nushell parser keyword, so the module is `proc` and the
+    # rename happens in expose — which means the allowlist must say `proc`.
+    let r = (with-env {NU_MCP_MODULES: "*"} { mcp tools (server-argv) | get name })
+    (has "mcp: the allowlist names modules, so proc is offered as exec" ($r | str join ",") "exec")
+  })
+
   (case "mcp: 'nu-shell' is the only nu- prefixed tool offered" {
     let names = (mcp tools (server-argv) | get name)
     let bad = ($names | where {|n| ($n | str starts-with "nu-") and $n != "nu-shell" })

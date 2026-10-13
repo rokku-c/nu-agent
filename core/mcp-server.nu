@@ -62,7 +62,12 @@ const SERVER_NAME = "agent"
 const SERVER_VERSION = "0.1.0"
 
 # the capabilities this server lends out — the contract, in one place.
-const TOOL_MODULES = ["read" "write" "edit" "shell" "exec" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon" "task"]
+# these are MODULE names, not tool names, and the two are not always the same:
+# `proc` is the module and `exec` the tool it is offered as, because nu cannot
+# have a command called `exec`. naming the tool here loads nothing and the module
+# is skipped — silently, since a missing module is a stderr note and an empty
+# tool list is a legal answer.
+const TOOL_MODULES = ["read" "write" "edit" "shell" "proc" "nu-shell" "calc" "host" "remote" "peers" "image" "jsonschema" "toon" "task"]
 # the default when NU_MCP_MODULES is unset: the six most useful to a coding agent
 const DEFAULT_MODULES = ["read" "write" "edit" "shell"]
 
