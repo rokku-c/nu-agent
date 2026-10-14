@@ -38,10 +38,20 @@ const BEGIN = "# ── nu-agent (begin) ── written by install.nu; edits ins
 const END = "# ── nu-agent (end) ──"
 
 # capability modules first (they become the MCP tools), then the runtime
-const TOOL_MODULES = ["edit" "proc" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "shell" "toon" "write"]
+# calc belongs here and was missing: it is the one module under tools/ this list
+# did not name, and toolset.nu's default set DOES name it. the gap only showed as
+# "module not found: calc" wrapped into "Eval block failed with pipeline input" —
+# see resolve-tools-from in core/agent.nu for why that message named nothing.
+const TOOL_MODULES = ["edit" "proc" "host" "image" "jsonschema" "nu-shell" "peers" "read" "remote" "shell" "toon" "write" "calc"]
 # task is a capability (the model calls it), but it is not in tools/ — it is a
 # wrapper around the loop, and belongs beside it
-const CORE_MODULES = ["agent" "context" "expose" "handoff" "interactive" "markdown" "mcp" "policy" "session" "style" "task" "trace"]
+#
+# reason is here for a boundary that has nothing to do with tools: MCP's tool listing
+# builds a SCRIPT and runs it in a `^nu --config` child. a child sees this config and
+# nothing else, so a helper that script calls has to be `use`d at the top level or the
+# call comes back "Command `reason` not found". (the same reason the apps below are
+# listed — a tool call is a child too.)
+const CORE_MODULES = ["agent" "context" "expose" "handoff" "interactive" "markdown" "mcp" "policy" "reason" "session" "style" "task" "trace"]
 # ── and the apps ──
 # composed capability sets, opt-in and per-directory. they were NOT installed by this script
 # until now, and that omission had a failure mode worth recording: `use`ing an app at the
@@ -58,6 +68,12 @@ const APP_MODULES = [
   "financial/series" "financial/macro" "financial/market" "financial/pred"
   "financial/backtest" "financial/trig" "financial/daily" "financial/factor"
   "financial/filings" "financial/options"
+  # wechat: the official bot channel. iLink is HTTP/JSON on Tencent's servers
+  # `reply` is here rather than imported privately by bridge.nu because a TOOL runs in a
+  # CHILD process that re-reads this config: anything the model can call has to be `use`d
+  # at the top level or the call comes back "Command `reply` not found".
+  "wechat/ilink" "wechat/bridge" "wechat/reply"
+  "toolset"
 ]
 
 def root []: nothing -> path {

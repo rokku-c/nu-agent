@@ -52,6 +52,7 @@ use ./markdown.nu
 use ./style.nu
 use ./mcp.nu
 use ./policy.nu
+use ./reason.nu
 use ./session.nu
 use ./provider.nu
 use ../tools/image.nu
@@ -252,6 +253,70 @@ def build-script [cmd: string, input: record]: nothing -> string {
   $"($cmd)($parts | str join '')"
 }
 
+# ── bounding a tool call ──
+#
+# `^nu … | complete` waits forever, and that is not theoretical: a `find ~` walked into
+# `~/Library/Group Containers`, blocked on a path the file provider owns, and the WeChat bridge
+# stopped polling for 22 minutes — process alive, CPU idle, indistinguishable from a healthy
+# idle loop. a tool call needs a deadline, and past the deadline the call has to FAIL, visibly,
+# back to the model.
+#
+# the mechanism, and why each piece is the shape it is:
+#
+#   · the watchdog is a background JOB (a thread, not a process), because the main thread is
+#     blocked inside `complete` and cannot police its own deadline. measured: the job does fire
+#     while `complete` is blocked.
+#   · `job kill` does NOT kill a process the job spawned — measured, an external `sleep`
+#     started by a killed job kept running. so the kill below is explicit.
+#   · the kill is a DESCENDANT WALK, not a process group. the tool child is not a group leader,
+#     so `kill -TERM -<pid>` would signal this process's own group — the bridge. walking the
+#     tree signals the tool and its children, and nothing else.
+#   · "it was a timeout" is recorded in a marker FILE, never inferred from the exit code. a
+#     killed tool exits on a signal and so does a tool that crashed by itself; deciding between
+#     them by exit code is how a timeout gets reported as a success, which is the exact failure
+#     that made this necessary — killing the stuck `find` by hand handed the model a clean empty
+#     result, and it would have answered "no such directory" about a directory that exists.
+#
+# known hole, said plainly: if the direct child exits while one of its OWN children stays alive
+# holding the output pipe, `complete` still waits — and by then the tree has been re-parented to
+# init, so the walk cannot reach it. that case is not handled.
+
+def ps-tree []: nothing -> list<record> {
+  ^ps -Ao pid=,ppid= | complete | get stdout | lines | each {|l|
+    let f = ($l | str trim | split row -r '\s+')
+    {pid: ($f.0 | into int), ppid: ($f.1 | into int)}
+  }
+}
+
+def descendants [root: int]: nothing -> list<int> {
+  let all = (ps-tree)
+  mut out = []
+  mut frontier = [$root]
+  while ($frontier | is-not-empty) {
+    let kids = ($all | where {|x| $x.ppid in $frontier } | get pid)
+    $out = ($out | append $kids)
+    $frontier = $kids
+  }
+  $out
+}
+
+# TERM first, so a well-behaved tool can clean up, then KILL whatever ignored it. deepest first,
+# so a parent's death never orphans a child the walk was about to reach.
+def kill-tree [root: int]: nothing -> nothing {
+  let rest = (descendants $root | reverse)
+  for p in $rest { try { ^kill -TERM $p } catch { } }
+  try { ^kill -TERM $root } catch { }
+  sleep 200ms
+  for p in $rest { try { ^kill -KILL $p } catch { } }
+  try { ^kill -KILL $root } catch { }
+}
+
+# every process this one forked. during an invoke-tool that is exactly the tool child — tool
+# calls run one at a time — which is what makes "kill my children" precise here, not a guess.
+def kill-own-children []: nothing -> nothing {
+  for k in (ps-tree | where ppid == $nu.pid | get pid) { kill-tree $k }
+}
+
 # execute one tool_use block, return a tool_result block.
 # exported for reuse: the MCP server (mcp-server.nu) executes tool calls with the same
 # machinery, so "reverse the name + look up the signature + build the command line +
@@ -260,7 +325,9 @@ export def "invoke-tool" [
   call: record
   map: any
   max_output: int
-  timeout: duration
+  timeout: duration           # how long the tool may run before it is killed — NOT the API
+                              # request timeout. they are different waits and want different
+                              # values, which is why the caller passes --tool-timeout here.
   verbose: bool
 ]: nothing -> record {
   let tool_name = ($call | get --optional name | default "")
@@ -308,13 +375,52 @@ export def "invoke-tool" [
       # which an interpolated string would try to expand.
       let wrapped = ('do { ' + $script + ' } | if (($in | describe) | str starts-with "record") { to json -r } else { $in }')
 
+      # ── run it under a deadline ──
+      # the marker is created by the watchdog BEFORE it kills, so the parent can tell "we ran
+      # out of time" from "the tool failed on its own" — see the note above `ps-tree`.
+      let marker = ($nu.temp-dir | path join $"nu-agent-tool-timeout-(random uuid)")
+      rm -f $marker
+      let wd = (job spawn {
+        sleep $timeout
+        # `touch`, not `$marker | save -f`: `save` takes the PATH as an argument and the CONTENT
+        # from the pipe, so piping the path in asks save for a filename it never got — a parse
+        # error, which is how this line first shipped into a config that `use`s this file.
+        touch $marker
+        kill-own-children
+      })
+
       let r = (^nu --config $nu.config-path -c $wrapped | complete)
+
+      # guarded, and that is not defensiveness: a watchdog that already fired has finished, and
+      # `job kill` on a finished job RAISES "Job N not found" — measured, and it aborted the
+      # reporting that came after it, turning a successful timeout into a crashed tool call.
+      try { job kill $wd } catch { }
+      let expired = ($marker | path exists)
+      rm -f $marker
+
+      # a tool that died says so on stderr, not only in the transcript the model sees. handing
+      # the error to the model is what lets it retry; putting it in the LOG is what lets a person
+      # afterwards tell "the run was slow because the model was thinking" from "the run was slow
+      # because a tool kept dying". on 2026-10-13 a tool timeout left no trace on disk at all —
+      # the only evidence was a process count and a suspiciously round 300 seconds.
+      if $expired {
+        print -e $"  !! tool '($tool_name)' timed out after ($timeout) — killed, failure returned to the model"
+      } else if $r.exit_code != 0 {
+        let errlines = ($r.stderr | lines)
+        let first = (if ($errlines | is-empty) { "" } else { $errlines | first | str substring 0..140 })
+        print -e $"  !! tool '($tool_name)' exited ($r.exit_code): ($first)"
+      }
+
       {
-        ok: ($r.exit_code == 0)
-        raw: (if $r.exit_code == 0 { $r.stdout } else { $"exit code ($r.exit_code): ($r.stderr)" })
+        ok: (($r.exit_code == 0) and (not $expired))
+        raw: (
+          if $expired {
+            $"tool timed out after ($timeout) — it was killed and produced no result. do NOT read this as 'found nothing': the search was cut off, not completed. retry with a narrower or faster command."
+          } else if $r.exit_code == 0 { $r.stdout } else { $"exit code ($r.exit_code): ($r.stderr)" }
+        )
       }
     } catch {|e|
-      {ok: false, raw: $"tool execution failed: ($e.msg)"}
+      {ok: false, raw: $"tool execution failed: (reason $e)"}
     })
 
   let ok = $outcome.ok
@@ -350,6 +456,43 @@ def as-list [x: any]: nothing -> list {
   } else {
     [$x]
   }
+}
+
+# ── resolving --tools-from, with the failure raised at THIS level ──
+# an `error make` raised inside the `each` below is wrapped by nu into
+# ShellError::EvalBlockWithInput, and the wrapper's .msg is the literal string
+# "Eval block failed with pipeline input" — the module that is actually missing
+# disappears from it. expose.nu met this first for from-commands and answers it the
+# same way: the closure hands the failure back as DATA, and the error is raised out
+# here, where it stays legible. this is not hypothetical — it is why a WeChat reply
+# read "agent 出错: Eval block failed with pipeline input" instead of naming `calc`.
+#
+# the catch below reads `reason $e` rather than `$e.msg`. be precise about why, because the
+# obvious story is wrong: catching inside the closure does NOT itself wrap anything, and for
+# the failure this code was written for — a module that is not `use`d — `$e.msg` arrives clean
+# and already reads "module not found: calc. use that module first" (measured against a live
+# config). what arrives wrapped is an error raised from inside one of from-module's OWN
+# closures — the `each {|c| command->tool … }` that does the conversion — and then `$e.msg` is
+# the wrapper. `reason` costs nothing on the clean path and is the only thing that works on
+# the other one, so it is what every error out of this file goes through.
+def resolve-tools-from [modules: list<string>]: nothing -> list {
+  if ($modules | is-empty) { return [] }
+
+  let resolved = (
+    $modules
+    | each {|m|
+        try { {module: $m, tools: (expose from-module $m)} } catch {|e| {module: $m, error: (reason $e)} }
+      }
+  )
+
+  let broken = ($resolved | where {|r| ($r | get --optional error) != null })
+  if ($broken | is-not-empty) {
+    let detail = ($broken | each {|r| $"($r.module): ($r.error)" } | str join "; ")
+    error make { msg: $"cannot use these modules — ($detail)" }
+  }
+
+  # concat, not flatten — see the warning above `as-list`
+  $resolved | get tools | reduce --fold [] {|x, acc| $acc | append $x }
 }
 
 # normalize the tools argument.
@@ -587,7 +730,7 @@ export def chat [
   let model = (strip-alias ((unset $model) | default (
     if $prior != null and ((($prior | get --optional model | default "") | is-not-empty)) { $prior.model } else { default-model $p }
   )))
-  let from_modules = ($tools_from | default [] | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
+  let from_modules = (resolve-tools-from ($tools_from | default []))
   let tools = (normalize-tools ($tools | append $from_modules))
 
   mut messages = $history
@@ -721,7 +864,12 @@ export def main [
   --policy: path                  # rules file for this run (default $nu.default-config-dir/agent-policy.json)
   --max-tokens (-t): int          # omitted = 128000 with --stream, 32000 without — see the note above
   --temperature (-T): float
-  --timeout: duration = 120sec
+  --timeout: duration = 120sec    # the API REQUEST timeout: how long to wait on the model
+  --tool-timeout: duration = 300sec  # how long ONE tool call may run before it is killed and
+                                     # handed back to the model as a failure. deliberately not
+                                     # the same knob as --timeout: waiting on the model and
+                                     # waiting on a shell command are different waits, and
+                                     # `120sec` is a sane bound for the first and not the second.
   --max-rounds (-r): int          # omitted = unlimited rounds, runs until the model wraps up itself
   --max-output: int = $DEFAULT_MAX_OUTPUT  # truncation length for one tool output
   --map: record                   # manually map tool name → nu command name, overriding the automatic reverse lookup
@@ -786,8 +934,9 @@ export def main [
   let tools_from = (
     if ($tools_from | is-empty) and $prior != null { ($prior | get --optional tools.modules | default []) } else { ($tools_from | default []) }
   )
-  # concat, not flatten — see the warning above `as-list`
-  let from_modules = ($tools_from | each {|m| expose from-module $m } | reduce --fold [] {|x, acc| $acc | append $x })
+  # the module names are resolved by a helper rather than inline here: it raises the
+  # error at ITS level, which is the only place the missing module is still named
+  let from_modules = (resolve-tools-from $tools_from)
   let tools = (normalize-tools ($tools | append $from_modules))
 
   # ── session bookkeeping ──
@@ -984,7 +1133,7 @@ export def main [
         )
         {ok: true, body: $b}
       } catch {|e|
-        {ok: false, err: ($e.msg | into string)}
+        {ok: false, err: (reason $e)}
       })
 
     if not $attempt.ok {
@@ -1056,7 +1205,7 @@ export def main [
               # and `path` ones still do.
               let input = ($c | get --optional input | default {})
               let id = ($c | get --optional id | default "")
-              let refusal = (try { gate $tname "" $input; null } catch {|e| ($e.msg | into string) })
+              let refusal = (try { gate $tname "" $input; null } catch {|e| (reason $e) })
               if $refusal != null {
                 {type: "tool_result", tool_use_id: $id, content: $refusal, is_error: true}
               } else {
@@ -1064,7 +1213,7 @@ export def main [
                 {type: "tool_result", tool_use_id: $id, content: $out.text, is_error: $out.is_error}
               }
             } else {
-              invoke-tool $c $map $max_output $timeout $verbose
+              invoke-tool $c $map $max_output $tool_timeout $verbose
             }
           )
           if $verbose {

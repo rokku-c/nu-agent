@@ -35,6 +35,7 @@
 
 use ../core/quote.nu
 use ../core/layout.nu
+use ../core/reason.nu
 
 const CFG_NAME = "hosts.json"
 const DEFAULT_READ_MAX = 200_000
@@ -279,7 +280,7 @@ export def exec [
       $stdin | run-external $cmd ...$args | complete
     }
   } catch {|e|
-    error make { msg: $"running ($cmd) failed: ($e.msg)" }
+    error make { msg: $"running ($cmd) failed: (reason $e)" }
   }
 }
 

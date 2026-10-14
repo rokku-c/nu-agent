@@ -10,6 +10,8 @@
 # parse. the same "stdout is data" rule the modules follow has to apply to the
 # test harness too. progress lines go to stderr either way.
 
+use ../core/reason.nu
+
 # one assertion: got must equal want
 export def eq [name: string, got: any, want: any]: nothing -> record {
   let ok = ($got == $want)
@@ -48,7 +50,7 @@ export def case [name: string, f: closure]: nothing -> record {
   try {
     do $f
   } catch {|e|
-    {name: $name, ok: false, detail: ($"crashed: ($e.msg)" | str substring 0..300)}
+    {name: $name, ok: false, detail: ($"crashed: (reason $e)" | str substring 0..300)}
   }
 }
 

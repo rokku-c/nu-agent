@@ -28,6 +28,7 @@
 # `/tools` and `/model` change the run, not the conversation, so they are printed
 # and remembered here; the transcript keeps only what was actually said.
 
+use ./reason.nu
 use ./session.nu
 use ./shells.nu
 
@@ -306,8 +307,10 @@ export def repl [
       if $no_save { print -e "(not saved: --no-save)" }
     } catch {|e|
       # a failed turn must not take the session down with it — the transcript so
-      # far is already on disk, and the next line continues from it
-      print -e $"turn failed: ($e.msg)"
+      # far is already on disk, and the next line continues from it.
+      # through `reason`, not `.msg`: a turn failure comes out of the agent loop,
+      # which nests closures, so `.msg` is the wrapper and says nothing
+      print -e $"turn failed: (reason $e)"
     }
     # NO blank line here. the loop already emits one after every round that
     # produced text, which for a finished turn is the last one — so a separator

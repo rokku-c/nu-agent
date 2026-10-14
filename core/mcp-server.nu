@@ -44,6 +44,7 @@
 # nu reads external processes as a stream, so ^cat | lines arrives line by line. measured.
 
 use ./expose.nu
+use ./reason.nu
 use ./agent.nu
 
 # Newest first. keep in sync with mcp.nu's PROTOCOL_VERSIONS.
@@ -102,7 +103,7 @@ def list-tools-inproc [spec: list<string>]: nothing -> list {
   )
   $names
   | each {|m|
-      try { expose from-module $m } catch {|e| print -e $"skipping module ($m): ($e.msg)"; [] }
+      try { expose from-module $m } catch {|e| print -e $"skipping module ($m): (reason $e)"; [] }
     }
   | flatten
 }
@@ -124,7 +125,7 @@ def list-tools-inproc [spec: list<string>]: nothing -> list {
 def list-tools []: nothing -> list {
   let spec = (module-spec)
   # single-quoted so the outer interpolation doesn't swallow $m / $e
-  let body = '| each {|m| try { expose from-module $m } catch {|e| print -e $"skipping module ($m): ($e.msg)"; [] } } | flatten | to json -r'
+  let body = '| each {|m| try { expose from-module $m } catch {|e| print -e $"skipping module ($m): (reason $e)"; [] } } | flatten | to json -r'
 
   # `*` resolves to TOOL_MODULES here, at build time — it is a constant, so unlike
   # the old prefix regex there is nothing for the child to expand. Exclusions
@@ -150,7 +151,7 @@ def list-tools []: nothing -> list {
       list-tools-inproc $spec
     } else {
       try { $r.stdout | from json } catch {|e|
-        print -e $"parsing the tool list failed, falling back to in-process: ($e.msg)"
+        print -e $"parsing the tool list failed, falling back to in-process: (reason $e)"
         list-tools-inproc $spec
       }
     }
@@ -221,10 +222,13 @@ def handle [msg: record]: nothing -> nothing {
     # reuse the execution machinery from agent.nu: the same call record shape.
     # note `use agent.nu` imports a namespace, so it has to be agent invoke-tool —
     # a bare invoke-tool errors with External command failed (been there)
+    # the 4th argument is the TOOL deadline: past it the tool is killed and the model gets a
+    # failure instead of a hang. it used to be `120sec` here, and nothing enforced it — the
+    # parameter was accepted and ignored until invoke-tool learned to run a watchdog.
     let r = (try {
-        agent invoke-tool {name: $name, input: $args, id: "mcp"} null 8000 120sec false
+        agent invoke-tool {name: $name, input: $args, id: "mcp"} null 8000 300sec false
       } catch {|e|
-        {content: $"tool execution failed: ($e.msg)", is_error: true}
+        {content: $"tool execution failed: (reason $e)", is_error: true}
       })
     reply $id {
       content: [{type: "text", text: ($r | get --optional content | default "" | into string)}]
@@ -260,7 +264,7 @@ print -e $"agent MCP server started · protocol ($PROTOCOL) · ($loaded)/($TOOL_
     if ($s | is-empty) {
       $n
     } else {
-      let msg = (try { $s | from json } catch {|e| print -e $"JSON parse failed: ($e.msg)"; null })
+      let msg = (try { $s | from json } catch {|e| print -e $"JSON parse failed: (reason $e)"; null })
       if $msg != null { handle $msg }
       $n + 1
     }

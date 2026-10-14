@@ -10,6 +10,7 @@
 # remote has no equivalent check, see the note on read-remote.
 
 use ./host.nu
+use ../core/reason.nu
 
 # per-read cap, so one huge file doesn't blow up the context
 const DEFAULT_MAX_BYTES = 200_000
@@ -32,7 +33,7 @@ def read-local [path: path, max_bytes: int]: nothing -> string {
   try {
     open --raw $path | into string
   } catch {|e|
-    error make { msg: $"can't read it, probably not a text file: ($e.msg)" }
+    error make { msg: $"can't read it, probably not a text file: (reason $e)" }
   }
 }
 
@@ -43,7 +44,7 @@ def read-remote [host: string, path: path, max_bytes: int]: nothing -> string {
   try {
     host fetch $host $path --max-bytes $max_bytes
   } catch {|e|
-    error make { msg: $e.msg }
+    error make { msg: (reason $e) }
   }
 }
 

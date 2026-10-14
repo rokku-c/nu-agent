@@ -59,6 +59,10 @@ use ../apps/financial/daily.nu
 use ../apps/financial/factor.nu
 use ../apps/financial/filings.nu
 use ../apps/financial/options.nu
+use ../apps/wechat/ilink.nu
+use ../apps/wechat/bridge.nu
+use ../apps/wechat/reply.nu
+use ../apps/toolset.nu
 
 # ── runtime: loaded, but only what the allowlist names becomes a tool ──
 use ../core/agent.nu
@@ -69,6 +73,7 @@ use ../core/mcp.nu
 # policy is runtime machinery (agent.nu imports it privately), but the tests
 # exercise its rule matching directly rather than only through a live run
 use ../core/policy.nu
+use ../core/reason.nu
 use ../core/handoff.nu
 use ../core/interactive.nu
 use ../core/session.nu

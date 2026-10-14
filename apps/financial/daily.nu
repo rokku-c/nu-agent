@@ -28,6 +28,7 @@
 # is a fact about that day, and hiding it would make the archive lie.
 
 use ./macro.nu
+use ../../core/reason.nu
 use ./market.nu
 use ./trig.nu
 use ./pred.nu
@@ -122,13 +123,13 @@ export def node [
         reading $w
       } catch {|e|
         {label: $w.label, series: null, as_of: null, latest: null, change: null,
-         percentile: null, zscore: null, observations: null, error: ($e.msg | str substring 0..200)}
+         percentile: null, zscore: null, observations: null, error: ((reason $e) | str substring 0..200)}
       }
     }
   )
 
   # the triggers and the prediction queue are the two halves of "what needs attention today"
-  let triggers = (try { trig check } catch {|e| [{state: "unknown", because: ($e.msg | str substring 0..200)}] })
+  let triggers = (try { trig check } catch {|e| [{state: "unknown", because: ((reason $e) | str substring 0..200)}] })
   let due = (try { pred due } catch {|e| [] })
 
   let record = {

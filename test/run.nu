@@ -30,6 +30,7 @@ const SUITES = [
   {name: "policy",  covers: "the tool permission gate"}
   {name: "handoff", covers: "importing another agent's conversation"}
   {name: "session", covers: "persistence, resume and the unfolded-history invariant"}
+  {name: "events",  covers: "the run event stream: append-only, partial-write tolerant, and its projections"}
   {name: "task",    covers: "subagent orchestration, depth and capability guards"}
   {name: "tui",     covers: "the interactive mode, driven through a pty"}
   {name: "mcp",     covers: "the MCP server over real stdio"}

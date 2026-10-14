@@ -11,6 +11,7 @@
 # a CRLF file into LF.)
 
 use ../tools/host.nu
+use ./reason.nu
 
 # per-call read/write cap. editing needs the whole file read in, so looser than
 # read's.
@@ -43,7 +44,7 @@ export def read-target [path: path, host: any, max_bytes: int]: nothing -> strin
     }
     try {
       open --raw $path | into string
-    } catch {|e| error make { msg: $"cannot read ($path): ($e.msg)" } }
+    } catch {|e| error make { msg: $"cannot read ($path): (reason $e)" } }
   } else {
     if not (host exists $host $path) {
       error make { msg: $"remote file not found: ($path) @ ($host)" }

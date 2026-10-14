@@ -59,7 +59,16 @@ def local-exec [command: string, sh: string, cwd: any, stdin: any, timeout: any]
   }
 
   # timeout: run in a background job; the parent waits for the result, kills it if it's late.
-  # job kill takes the child processes with it (pgrep is 0 after the kill in testing)
+  #
+  # CORRECTION, measured 2026-10-13: `job kill` does NOT take the child processes with it. this
+  # comment used to claim "(pgrep is 0 after the kill in testing)", and that is not what happens
+  # — a job running an external command, killed, left the external running: a `sleep` started by
+  # a killed job was still in `pgrep` afterwards. so this kills the WAIT, not the command: the
+  # command and its children are orphaned to init, where nothing here can reach them.
+  #
+  # the deadline that actually holds is in invoke-tool (core/agent.nu), which kills the process
+  # TREE at the boundary every tool call passes through. this one still bounds a direct `shell`
+  # call, which is why it stays — but do not read it as having stopped anything.
   let id = (job spawn { do $body | job send 0 })
   try {
     job recv --timeout $timeout
